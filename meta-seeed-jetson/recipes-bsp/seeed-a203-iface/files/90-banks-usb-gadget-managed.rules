@@ -1,0 +1,3 @@
+# Override NM's default 85-nm-unmanaged.rules which marks all gadget interfaces unmanaged.
+# We want NM to manage usb0 so it can be bridged into l4tbr0 with method=shared (DHCP server).
+ENV{DEVTYPE}=="gadget", ENV{INTERFACE}=="usb0", ENV{NM_UNMANAGED}="0"

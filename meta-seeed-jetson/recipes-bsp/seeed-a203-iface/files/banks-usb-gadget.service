@@ -1,0 +1,13 @@
+[Unit]
+Description=Banks Jetson Linux USB device-mode gadget
+After=systemd-modules-load.service
+Before=network.target NetworkManager.service
+ConditionPathExists=/sys/class/udc
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/banks-usb-gadget.sh
+
+[Install]
+WantedBy=multi-user.target

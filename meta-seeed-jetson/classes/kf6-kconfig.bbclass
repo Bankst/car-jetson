@@ -1,0 +1,1 @@
+inherit kf6_kconfig

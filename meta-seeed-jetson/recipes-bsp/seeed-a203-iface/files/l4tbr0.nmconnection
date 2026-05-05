@@ -1,0 +1,16 @@
+[connection]
+id=l4tbr0
+type=bridge
+interface-name=l4tbr0
+autoconnect=true
+autoconnect-priority=100
+
+[bridge]
+stp=false
+
+[ipv4]
+method=shared
+addresses=192.168.55.1/24
+
+[ipv6]
+method=ignore

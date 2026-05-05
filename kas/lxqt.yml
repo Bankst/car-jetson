@@ -1,0 +1,11 @@
+header:
+  version: 14
+  includes:
+    - base.yml
+
+# Placeholder for a future LXQt variant. Filling this in becomes:
+#   1. Add a meta-lxqt or meta-wayland repo entry below.
+#   2. Add a packagegroup-de-lxqt-minimal.bb recipe.
+#   3. Add a seeed-jetson-image-lxqt.bb image recipe.
+#   4. Set `target:` here to seeed-jetson-image-lxqt.
+target: banks-jetson-image-base

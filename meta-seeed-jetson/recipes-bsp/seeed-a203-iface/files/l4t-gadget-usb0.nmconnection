@@ -1,0 +1,10 @@
+[connection]
+id=l4t-gadget-usb0
+type=ethernet
+interface-name=usb0
+master=l4tbr0
+slave-type=bridge
+autoconnect=true
+autoconnect-priority=100
+
+[ethernet]

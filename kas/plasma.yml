@@ -1,0 +1,27 @@
+header:
+  version: 14
+  includes:
+    - base.yml
+
+target: banks-jetson-image-plasma
+
+repos:
+  meta-qt6:
+    url: https://code.qt.io/yocto/meta-qt6.git
+    commit: v6.9.0
+
+  yocto-meta-kf6:
+    url: https://invent.kde.org/packaging/yocto-meta-kf6.git
+    branch: master
+
+  yocto-meta-kde:
+    url: https://invent.kde.org/packaging/yocto-meta-kde.git
+    branch: master
+
+local_conf_header:
+  kde-compat-override: |
+    # KDE's master branches list LAYERSERIES_COMPAT as "styhead walnascar" but their own
+    # scarthgap.xml manifest pairs them with poky scarthgap. Override to allow.
+    LAYERSERIES_COMPAT_qt6-layer:append = " scarthgap"
+    LAYERSERIES_COMPAT_kf6:append = " scarthgap"
+    LAYERSERIES_COMPAT_kde:append = " scarthgap"

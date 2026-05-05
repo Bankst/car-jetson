@@ -1,0 +1,9 @@
+[connection]
+id=can0
+type=can
+interface-name=can0
+autoconnect=true
+autoconnect-priority=100
+
+[can]
+bitrate=500000

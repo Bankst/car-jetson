@@ -1,0 +1,25 @@
+build/
+build-*/
+sstate-cache/
+downloads/
+.kas/
+*.log
+
+# External layers — kas-container clones these from kas/*.yml
+poky/
+meta-openembedded/
+meta-tegra/
+meta-qt6/
+yocto-meta-kde/
+yocto-meta-kf6/
+
+# Keep input tarballs out of git; reference them from a separate doc.
+_input/extracted/
+_input/*.tar.gz*
+
+# Build artefacts
+*.img
+*.tar.gz
+
+# Flash runtime artifacts
+.found-jetson
