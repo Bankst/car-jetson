@@ -6,9 +6,12 @@
 	compatible = "nvidia,tegra194";
 
 	fragment@0 {
-		target-path = "/serial@c280000";
+		target-path = "/";
+
 		__overlay__ {
-			status = "okay";
+			serial@c280000 {
+				status = "okay";
+			};
 		};
 	};
 };

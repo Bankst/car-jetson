@@ -10,6 +10,7 @@ IMAGE_FEATURES += "ssh-server-openssh debug-tweaks package-management"
 
 IMAGE_INSTALL = " \
     packagegroup-core-boot \
+    packagegroup-base \
     packagegroup-seeed-base \
 "
 
