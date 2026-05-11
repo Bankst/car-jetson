@@ -1,27 +1,30 @@
-SUMMARY = "Seeed A203 V2 device tree binaries for Xavier NX"
-DESCRIPTION = "Carrier-board-customized DTBs from Seeed's JP 5.1.4 driver \
-pack for the A203 V2. Filenames match NVIDIA's stock so the meta-tegra \
-linux-tegra bbappend can drop them in over the kernel-built variants."
-LICENSE = "CLOSED"
+SUMMARY = "Seeed A203 V2 carrier board support for Xavier NX"
+DESCRIPTION = "DT overlay enabling UARTC (debug serial) and pinmux config \
+for the A203 V2 carrier. Uses the kernel-built DTB as base — no longer \
+ships full prebuilt DTBs from Seeed's JP 5.1.4 driver pack."
+LICENSE = "MIT"
+LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
 COMPATIBLE_MACHINE = "jetson-xavier-nx-a203"
 
 SRC_URI = " \
-    file://tegra194-p3668-0000-p3509-0000.dtb \
-    file://tegra194-p3668-0001-p3509-0000.dtb \
-    file://tegra194-p3668-all-p3509-0000.dtb \
+    file://a203-overlay.dts \
     file://tegra19x-mb1-pinmux-p3668-a01.cfg \
 "
 
+DEPENDS = "dtc-native"
+
 S = "${WORKDIR}"
+
+do_compile() {
+    dtc -I dts -O dtb -@ ${WORKDIR}/a203-overlay.dts -o ${WORKDIR}/a203-overlay.dtbo
+}
 
 inherit deploy
 
-do_compile[noexec] = "1"
-
 do_deploy() {
-    install -d ${DEPLOYDIR}/a203-dtb
-    install -m 0644 ${WORKDIR}/tegra194-p3668-*.dtb ${DEPLOYDIR}/a203-dtb/
-    install -m 0644 ${WORKDIR}/tegra19x-mb1-pinmux-p3668-a01.cfg ${DEPLOYDIR}/a203-dtb/
+    install -d ${DEPLOYDIR}
+    install -m 0644 ${WORKDIR}/a203-overlay.dtbo ${DEPLOYDIR}/
+    install -m 0644 ${WORKDIR}/tegra19x-mb1-pinmux-p3668-a01.cfg ${DEPLOYDIR}/a203-dtb-pinmux.cfg
 }
-addtask deploy before do_build after do_install
+addtask deploy before do_build after do_compile

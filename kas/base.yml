@@ -2,7 +2,7 @@ header:
   version: 14
 
 distro: banks-jetson
-machine: jetson-xavier-nx-a203
+machine: jetson-xavier-nx-banks-devkit
 target: banks-jetson-image-base
 
 repos:

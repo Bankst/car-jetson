@@ -37,6 +37,7 @@ RDEPENDS:${PN} = " \
     sudo \
     nano \
     htop \
+    ncdu \
     rsync \
     openssh \
     ca-certificates \
@@ -46,7 +47,6 @@ RDEPENDS:${PN} = " \
     parted \
     nvme-cli \
     \
-    seeed-a203-iface \
     banks-root-authorized-keys \
 "
 
