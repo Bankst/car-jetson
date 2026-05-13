@@ -102,16 +102,23 @@ KAS_BUILD_DIR=$PWD/build KAS_RUNTIME_ARGS="--security-opt label=disable" \
 
 ### Build with distributed icecc (optional, faster)
 
-Adds remote node `bankst@10.0.10.45` (EPYC 7302P, 32t) as compile farm.
-Local Ryzen 9800X3D contributes its 16t too. Aggregate ≈48t. Sustained
-~40 parallel jobs during heavy compile bursts in testing.
+Adds remote node `dev-ct` (EPYC 7302P, 32t, Tailscale 100.74.250.91) as
+compile farm. Scheduler runs on this Ryzen (100.72.134.17). Aggregate 48t
+(16 local + 32 remote). dev-ct is on Tailscale directly — icecc uses
+Tailscale IPs throughout.
 
 Prereqs (one-time):
-- `icecc-scheduler` + `iceccd` running on `10.0.10.45` with
-  `ICECC_NETNAME=banks-yocto`, `ICECC_ALLOW_REMOTE=yes`,
-  `ICECC_SCHEDULER_HOST=10.0.10.45`. Verify `ss -tlnp` shows ports 8765
-  and 10245 listening. See `docker/REMOTE_ICECC_SETUP.md`.
-- `iceccd` running locally with same netname + `SCHEDULER_HOST=10.0.10.45`.
+- `icecc-scheduler` running on Ryzen (`systemctl start icecc-scheduler`).
+  Listens on port 8765.
+- `iceccd` on Ryzen: `ICECC_SCHEDULER_HOST=100.72.134.17`, 16 jobs,
+  `ICECC_NETNAME=banks-yocto`. Config: `/etc/icecc/icecc.conf`.
+- `iceccd` on dev-ct (100.74.250.91): `ICECC_SCHEDULER_HOST=100.72.134.17`,
+  32 jobs, same netname. Config: `/etc/icecc/icecc.conf`.
+  No scheduler on dev-ct (`systemctl stop icecc-scheduler` there).
+- Verify both registered: `ss -tn 'dport = :8765'` should show two ESTAB
+  connections to 100.72.134.17:8765.
+- Custom kas image with the icecc client: `docker build -t kas-icecc:4.7
+  -f docker/kas-icecc.Dockerfile docker/`.
 - Custom kas image with the icecc client: `docker build -t kas-icecc:4.7
   -f docker/kas-icecc.Dockerfile docker/`.
 
