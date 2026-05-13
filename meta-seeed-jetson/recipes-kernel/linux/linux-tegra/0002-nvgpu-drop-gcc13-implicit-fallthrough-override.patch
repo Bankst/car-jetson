@@ -1,0 +1,24 @@
+From: Banks Troutman <banks.troutman@oxos.com>
+Date: Tue, 13 May 2026 00:00:00 +0000
+Subject: [PATCH] nvgpu: drop explicit -Wimplicit-fallthrough=3 from ccflags
+
+GCC 13 + -Werror: the nvgpu Makefile explicitly re-enables
+-Wimplicit-fallthrough=3 via ccflags-y, which appends AFTER
+KCFLAGS in the compiler invocation, overriding the
+-Wno-implicit-fallthrough suppression in KCFLAGS.
+
+Remove the explicit ccflags-y line; -Wall still enables the warning at
+its default level but KCFLAGS -Wno-implicit-fallthrough (which is
+appended to KBUILD_CFLAGS before ccflags) now wins.
+
+---
+--- a/nvidia/nvgpu/drivers/gpu/nvgpu/Makefile
++++ b/nvidia/nvgpu/drivers/gpu/nvgpu/Makefile
+@@ -17,7 +17,6 @@
+ ccflags-y += -I$(srctree.nvgpu)/include/uapi
+
+ ccflags-y += -I$(srctree)/drivers/devfreq
+
+-ccflags-y += $(call cc-option, -Wimplicit-fallthrough=3)
+ ccflags-y += -Wframe-larger-than=2048
+ ccflags-y += -Wno-multichar

@@ -1,0 +1,154 @@
+From: Banks Troutman <banks.troutman@oxos.com>
+Date: Tue, 13 May 2026 00:00:00 +0000
+Subject: [PATCH] serial: tegra: add console and earlycon support
+
+tegra-hsuart sets .cons = NULL so console=ttyTHSx is silently ignored.
+Add earlycon (UART_LSR_THRE polling, fires before driver probe) and a
+late console (TEGRA_UART_LSR_TXFIFO_FULL polling, fires after probe).
+
+Cmdline: earlycon=tegra_uart,mmio32,0x3100000 console=ttyTHS0,115200
+
+---
+--- a/drivers/tty/serial/serial-tegra.c
++++ b/drivers/tty/serial/serial-tegra.c
+@@ -156,6 +156,8 @@
+ 	struct dentry				*debugfs;
+ 	bool					early_printk_console_instance;
+ };
++static struct tegra_uart_port *tegra_uart_ports[TEGRA_UART_MAXIMUM];
++
+ 
+ static void tegra_uart_start_next_tx(struct tegra_uart_port *tup);
+ static int tegra_uart_start_rx_dma(struct tegra_uart_port *tup);
+@@ -1647,11 +1649,114 @@
+ 	.release_port	= tegra_uart_release_port,
+ };
+ 
++/* --- earlycon ------------------------------------------------------------ */
++
++static void tegra_uart_earlycon_putchar(struct uart_port *port, int ch)
++{
++	/* UART_LSR_THRE: TX holding register empty — standard 16550 bit,
++	 * reliable before FIFO is fully initialised by the driver */
++	while (!(readl(port->membase + (UART_LSR << port->regshift)) & UART_LSR_THRE))
++		cpu_relax();
++	writel(ch, port->membase + (UART_TX << port->regshift));
++}
++
++static void tegra_uart_earlycon_write(struct console *con, const char *s,
++				      unsigned int n)
++{
++	struct earlycon_device *dev = con->data;
++
++	uart_console_write(&dev->port, s, n, tegra_uart_earlycon_putchar);
++}
++
++static int __init tegra_uart_earlycon_setup(struct earlycon_device *dev,
++					    const char *opt)
++{
++	if (!dev->port.membase)
++		return -ENODEV;
++	dev->port.regshift = 2;
++	dev->con->write = tegra_uart_earlycon_write;
++	return 0;
++}
++
++OF_EARLYCON_DECLARE(tegra194_uart, "nvidia,tegra194-uart",
++		    tegra_uart_earlycon_setup);
++OF_EARLYCON_DECLARE(tegra20_uart, "nvidia,tegra20-uart",
++		    tegra_uart_earlycon_setup);
++EARLYCON_DECLARE(tegra_uart, tegra_uart_earlycon_setup);
++
++/* --- late console -------------------------------------------------------- */
++
++static void tegra_uart_console_putchar(struct uart_port *port, int ch)
++{
++	struct tegra_uart_port *tup = to_tegra_uport(port);
++
++	while (tegra_uart_read(tup, UART_LSR) & TEGRA_UART_LSR_TXFIFO_FULL)
++		cpu_relax();
++	tegra_uart_write(tup, ch, UART_TX);
++}
++
++static void tegra_uart_console_write(struct console *co, const char *s,
++				     unsigned int count)
++{
++	struct uart_port *port;
++	unsigned long flags;
++	int locked = 1;
++
++	if ((unsigned int)co->index >= TEGRA_UART_MAXIMUM ||
++	    !tegra_uart_ports[co->index])
++		return;
++	port = &tegra_uart_ports[co->index]->uport;
++	if (!port->membase)
++		return;
++
++	local_irq_save(flags);
++	if (port->sysrq)
++		locked = 0;
++	else if (oops_in_progress)
++		locked = uart_port_trylock(port);
++	else
++		uart_port_lock(port);
++
++	uart_console_write(port, s, count, tegra_uart_console_putchar);
++
++	if (locked)
++		uart_port_unlock(port);
++	local_irq_restore(flags);
++}
++
++static int tegra_uart_console_setup(struct console *co, char *options)
++{
++	struct tegra_uart_port *tup;
++	int baud = 115200, bits = 8, parity = 'n', flow = 'n';
++
++	if ((unsigned int)co->index >= TEGRA_UART_MAXIMUM)
++		return -EINVAL;
++	tup = tegra_uart_ports[co->index];
++	if (!tup || !tup->uport.membase)
++		return -ENODEV;
++	if (options)
++		uart_parse_options(options, &baud, &parity, &bits, &flow);
++	return uart_set_options(&tup->uport, co, baud, parity, bits, flow);
++}
++
++static struct uart_driver tegra_uart_driver;
++
++static struct console tegra_uart_console = {
++	.name	= "ttyTHS",
++	.write	= tegra_uart_console_write,
++	.device	= uart_console_device,
++	.setup	= tegra_uart_console_setup,
++	.flags	= CON_PRINTBUFFER,
++	.index	= -1,
++	.data	= &tegra_uart_driver,
++};
++
++
+ static struct uart_driver tegra_uart_driver = {
+ 	.owner		= THIS_MODULE,
+ 	.driver_name	= "tegra_hsuart",
+ 	.dev_name	= "ttyTHS",
+-	.cons		= NULL,
++	.cons		= &tegra_uart_console,
+ 	.nr		= TEGRA_UART_MAXIMUM,
+ };
+ 
+@@ -1948,6 +2051,7 @@
+ 		dev_err(&pdev->dev, "Failed to add uart port, err %d\n", ret);
+ 		return ret;
+ 	}
++	tegra_uart_ports[u->line] = tup;
+ 
+ 	if (tup->enable_rx_buffer_throttle) {
+ 		timer_setup(&tup->timer, tegra_uart_rx_buffer_throttle_timer, 0);
+@@ -1968,6 +2072,7 @@
+ 		del_timer_sync(&tup->timer);
+ 	del_timer_sync(&tup->error_timer);
+ 
++	tegra_uart_ports[u->line] = NULL;
+ 	uart_remove_one_port(&tegra_uart_driver, u);
+ 	return 0;
+ }

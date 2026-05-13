@@ -16,7 +16,29 @@ IMAGE_INSTALL = " \
 
 IMAGE_LINGUAS = ""
 
-ROOTFS_POSTPROCESS_COMMAND:append = " banks_trim_rootfs;"
+ROOTFS_POSTPROCESS_COMMAND:append = " banks_trim_rootfs; banks_bake_unit_fixes;"
+
+banks_bake_unit_fixes() {
+    # Mask systemd-networkd — NM owns all interfaces; networkd causes ~100s boot delay
+    for unit in systemd-networkd.service systemd-networkd-wait-online.service \
+                systemd-networkd.socket systemd-network-generator.service; do
+        ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/${unit}
+    done
+
+    # nvs-service: drop network-online.target dependency (sensor HAL idle on A203)
+    install -d ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/nvs-service.service.d
+    printf '[Unit]\nAfter=\nWants=\nAfter=nvstartup.service\n' \
+        > ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/nvs-service.service.d/no-network-online.conf
+
+    # Enable serial console login on ttyTHS0 (40-pin header pins 8/10, confirmed physical port)
+    install -d ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants
+    ln -sf /lib/systemd/system/serial-getty@.service \
+        ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/getty.target.wants/serial-getty@ttyTHS0.service
+
+    # Allow root login on Tegra HSUARTs — not in upstream securetty list
+    printf 'ttyTHS0\nttyTHS1\nttyTHS2\nttyTHS3\nttyTHS4\nttyTCU0\n' \
+        >> ${IMAGE_ROOTFS}${sysconfdir}/securetty
+}
 
 banks_trim_rootfs() {
     for kdir in ${IMAGE_ROOTFS}${nonarch_base_libdir}/modules/*/kernel; do
@@ -40,7 +62,5 @@ banks_trim_rootfs() {
     rm -f ${IMAGE_ROOTFS}${bindir}/bltest
     rm -f ${IMAGE_ROOTFS}${bindir}/ecperf
 
-    rm -rf ${IMAGE_ROOTFS}${datadir}/keymaps
-    rm -rf ${IMAGE_ROOTFS}${datadir}/consolefonts
     rm -rf ${IMAGE_ROOTFS}${datadir}/sounds
 }
