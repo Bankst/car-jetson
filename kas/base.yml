@@ -13,6 +13,10 @@ repos:
       meta:
       meta-poky:
       meta-yocto-bsp:
+    patches:
+      icecc-no-null-prefix:
+        repo: meta-seeed-jetson
+        path: patches/icecc-no-null-prefix.patch
 
   meta-openembedded:
     url: https://git.openembedded.org/meta-openembedded
@@ -43,3 +47,27 @@ local_conf_header:
   parallelism: |
     BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
     PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"
+
+  icecc: |
+    # Distributed compile via Icecream.
+    # Active only when the kas-icecc image is used and the local iceccd
+    # Unix socket is bind-mounted in. With stock kas image, INHERIT remains
+    # but `icecc` binary is absent from HOSTTOOLS_NONFATAL — bbclass no-ops
+    # silently. See docker/README.md.
+    INHERIT += "icecc"
+    ICECC_PATH ?= "/usr/bin/icecc"
+    # Aggregate parallelism: local 16t + remote 32t. Tune as nodes change.
+    ICECC_PARALLEL_MAKE ?= "-j 50"
+    # Local preprocessing is mandatory: ICECC_REMOTE_CPP=1 was reproduced
+    # to silently truncate bench-slope.o (libgcrypt) to 0 bytes — link
+    # then failed with "undefined reference to main". Switching to "0"
+    # (preprocess locally, ship preprocessed source) made libgcrypt build
+    # cleanly. Slightly slower than remote CPP but produces deterministic,
+    # complete object files.
+    ICECC_REMOTE_CPP ?= "0"
+    # Parse-time NULL-prefix crash workaround: target-sdk-provides-dummy
+    # overrides PACKAGE_ARCH so icecc_is_allarch returns False, defeating
+    # the bbclass's ICECC_RECIPE_DISABLE bail-out during vardep expansion.
+    # Force-disable icecc for the recipe so set_icecc_env never reaches
+    # icecc_version's HOST_PREFIX check.
+    ICECC_DISABLED:pn-target-sdk-provides-dummy = "1"

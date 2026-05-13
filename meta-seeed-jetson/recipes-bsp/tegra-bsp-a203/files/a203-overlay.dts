@@ -12,6 +12,14 @@
 			serial@c280000 {
 				status = "okay";
 			};
+
+			sdhci@3440000 {
+				status = "okay";
+				uhs-mask = <0x00>;
+				no-sdio;
+				no-mmc;
+				cd-gpios = <&tegra_main_gpio 0x82 0x00>;
+			};
 		};
 	};
 };

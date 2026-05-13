@@ -47,6 +47,32 @@ RDEPENDS:${PN} = " \
     parted \
     nvme-cli \
     \
+    strace \
+    ltrace \
+    perf \
+    lsof \
+    iotop \
+    pciutils \
+    usbutils \
+    tcpdump \
+    gdb \
+    gdbserver \
+    iftop \
+    bmon \
+    nmap \
+    powertop \
+    stress-ng \
+    sysstat \
+    socat \
+    netcat-openbsd \
+    i2c-tools \
+    can-utils \
+    picocom \
+    minicom \
+    screen \
+    tio \
+    evtest \
+    \
     banks-root-authorized-keys \
 "
 

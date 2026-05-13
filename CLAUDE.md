@@ -100,6 +100,52 @@ KAS_BUILD_DIR=$PWD/build KAS_RUNTIME_ARGS="--security-opt label=disable" \
   kas-container build kas/plasma.yml        # +1–2 hours cold for KDE
 ```
 
+### Build with distributed icecc (optional, faster)
+
+Adds remote node `bankst@10.0.10.45` (EPYC 7302P, 32t) as compile farm.
+Local Ryzen 9800X3D contributes its 16t too. Aggregate ≈48t. Sustained
+~40 parallel jobs during heavy compile bursts in testing.
+
+Prereqs (one-time):
+- `icecc-scheduler` + `iceccd` running on `10.0.10.45` with
+  `ICECC_NETNAME=banks-yocto`, `ICECC_ALLOW_REMOTE=yes`,
+  `ICECC_SCHEDULER_HOST=10.0.10.45`. Verify `ss -tlnp` shows ports 8765
+  and 10245 listening. See `docker/REMOTE_ICECC_SETUP.md`.
+- `iceccd` running locally with same netname + `SCHEDULER_HOST=10.0.10.45`.
+- Custom kas image with the icecc client: `docker build -t kas-icecc:4.7
+  -f docker/kas-icecc.Dockerfile docker/`.
+
+Invoke:
+
+```sh
+KAS_BUILD_DIR=$PWD/build \
+KAS_CONTAINER_IMAGE=kas-icecc:4.7 \
+  kas-container \
+    --runtime-args "--network=host" \
+    --runtime-args "-v /run/icecc:/var/run/icecc:rw" \
+    build kas/base.yml
+```
+
+Two non-obvious wiring details:
+
+1. **`KAS_RUNTIME_ARGS` env var is overwritten** by `kas-container` script
+   (line 232) — pass via `--runtime-args` CLI flag instead.
+2. **The local iceccd Unix socket must be bind-mounted** into the container
+   at `/var/run/icecc/iceccd.socket`. Without this the icecc client falls
+   back to building locally (silent regression). The mount is the
+   `-v /run/icecc:/var/run/icecc:rw` line.
+
+`--network=host` is required so the local iceccd (talking via the socket)
+sees the scheduler on the LAN. Monitor placement with `icemon` on the remote
+box, or `ss -tn '( sport = :10245 )'` on `10.0.10.45` to count live jobs.
+See `docker/README.md` for full notes.
+
+**One-time sstate cost**: adding `INHERIT += "icecc"` changes recipe task
+signatures across the board, so the first build after enabling will rebuild
+most things (≈10 min for `bitbake openssl` + cascade in testing). After
+that, the new "icecc-aware" sstate is durable and subsequent builds hit
+cache normally.
+
 ### Flash
 
 ```sh
@@ -141,7 +187,7 @@ After reboot: USB-A203 micro-USB to host PC creates a CDC-NCM ethernet (host get
 - Replace `debug-tweaks` (passwordless root) with a proper user account once dev workflow is settled.
 - Plasma image (`kas/plasma.yml`) build hasn't been attempted yet. Expect KDE Plasma 6 Wayland to work via KWin; first time on Tegra so sharp edges are likely.
 - LXQt variant kas/recipe pair when ready.
-- Consider sstate mirror + icecc for distributed builds if/when this becomes a multi-machine project (notes already in conversation history).
+- sstate mirror is still TODO. icecc plumbing landed (see "Build with distributed icecc" section); just needs `iceccd` + scheduler installed on `10.0.10.45` and locally to activate.
 
 ## Memory
 
