@@ -119,8 +119,6 @@ Prereqs (one-time):
   connections to 100.72.134.17:8765.
 - Custom kas image with the icecc client: `docker build -t kas-icecc:4.7
   -f docker/kas-icecc.Dockerfile docker/`.
-- Custom kas image with the icecc client: `docker build -t kas-icecc:4.7
-  -f docker/kas-icecc.Dockerfile docker/`.
 
 Invoke:
 
@@ -143,8 +141,8 @@ Two non-obvious wiring details:
    `-v /run/icecc:/var/run/icecc:rw` line.
 
 `--network=host` is required so the local iceccd (talking via the socket)
-sees the scheduler on the LAN. Monitor placement with `icemon` on the remote
-box, or `ss -tn '( sport = :10245 )'` on `10.0.10.45` to count live jobs.
+sees the scheduler on the LAN. Monitor placement with `icemon` on dev-ct, or
+`ss -tn '( sport = :10245 )'` on 100.74.250.91 to count live jobs.
 See `docker/README.md` for full notes.
 
 **One-time sstate cost**: adding `INHERIT += "icecc"` changes recipe task
@@ -187,6 +185,18 @@ After reboot: USB-A203 micro-USB to host PC creates a CDC-NCM ethernet (host get
 
 9. **USB gadget approach: NM owns the bridge.** We do *not* install meta-tegra's `l4t-usb-device-mode` recipe — it ships only systemd-networkd `.network`/`.netdev` files (and even then it's incomplete — the actual gadget creation script is missing from meta-tegra; NVIDIA ships it in their `nv-l4t-usb-device-mode` deb which meta-tegra doesn't pull in). Our setup: a small `banks-usb-gadget.sh` configfs script + systemd unit + NM keyfiles for the bridge, all under `recipes-bsp/seeed-a203-iface/`.
 
+10. **GCC 13 vs L4T 5.10 kernel — three layers of fixes required.** L4T 5.10 was authored for GCC 11; scarthgap GCC 13 promotes four new warning classes to errors. Fixes:
+    - **KCFLAGS** in `linux-tegra_%.bbappend`: `KCFLAGS='-Wno-address -Wno-implicit-fallthrough -Wno-int-in-bool-context -Wno-tautological-compare'` covers in-tree warnings from trace macros, ACPI, nvidia display, and the r8168 OOT module.
+    - **Patch `0002-nvgpu-drop-gcc13-implicit-fallthrough-override.patch`**: nvgpu's `Makefile` explicitly adds `ccflags-y += $(call cc-option, -Wimplicit-fallthrough=3)` which appends *after* KCFLAGS in the compiler invocation, overriding the suppression. The patch removes that line.
+    - **ATF bbappend** (`recipes-bsp/arm-trusted-firmware/arm-trusted-firmware_%.bbappend`): ATF's build system collects `-Werror` in its own `ERRORS` make variable (Makefile line 409), not KCFLAGS. `EXTRA_CFLAGS` has no effect. Fix: `EXTRA_OEMAKE:append = " ERRORS='-Werror -Wno-error=logical-op'"`.
+    - These were exposed all at once because `INHERIT += "icecc"` changes all task hashes → full sstate miss → first icecc build rebuilt everything from scratch.
+
+11. **Serial-tegra console patch: exists but NOT wired — causes initrd-flash lockup.** `linux-tegra/0001-serial-tegra-add-console-and-earlycon-support.patch` adds earlycon + late console to the tegra-hsuart driver. The patch is syntactically correct and compiled cleanly, but the initrd kernel (used by `initrd-flash`) locked up on flash. The patch is kept for future reference but is intentionally absent from `SRC_URI`. The `console=ttyTHS0,115200n8` and `earlycon=...` kernel args are also absent from `banks-jetson.conf`. Serial getty on `ttyTHS0` still works via the userspace `serial-getty@ttyTHS0.service` symlink in the image recipe — no kernel patch needed for that.
+
+12. **Stale `bitbake.lock` / `bitbake.sock` block new builds after unclean container exit.** If `kas-container` is Ctrl-C'd or OOM-killed, these files remain in `build/`. The next `kas-container build` will hang waiting for the lock. Fix: `rm -f build/bitbake.lock build/bitbake.sock` before relaunching.
+
+13. **`~/bstat` script for build status without prompting Claude.** Quick tail of the most recent `/tmp/r3-build-*.log` with error count. See the script at `~/bstat`.
+
 ## Open follow-ups
 
 - Verify CAN0 actually comes up at 500kbps on hardware (NM 1.46 `[can]` keyfile syntax — empirically untested for us yet).
@@ -194,7 +204,7 @@ After reboot: USB-A203 micro-USB to host PC creates a CDC-NCM ethernet (host get
 - Replace `debug-tweaks` (passwordless root) with a proper user account once dev workflow is settled.
 - Plasma image (`kas/plasma.yml`) build hasn't been attempted yet. Expect KDE Plasma 6 Wayland to work via KWin; first time on Tegra so sharp edges are likely.
 - LXQt variant kas/recipe pair when ready.
-- sstate mirror is still TODO. icecc plumbing landed (see "Build with distributed icecc" section); just needs `iceccd` + scheduler installed on `10.0.10.45` and locally to activate.
+- sstate mirror is still TODO.
 
 ## Memory
 
