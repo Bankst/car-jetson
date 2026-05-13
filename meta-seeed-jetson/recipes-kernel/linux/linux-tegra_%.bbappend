@@ -6,7 +6,6 @@ SRC_URI:append:jetson-xavier-nx-a203 = " \
     file://usb-modem.cfg \
     file://usb-gadget.cfg \
     file://dt-overlay.cfg \
-    file://0001-serial-tegra-add-console-and-earlycon-support.patch \
     file://0002-nvgpu-drop-gcc13-implicit-fallthrough-override.patch \
 "
 
