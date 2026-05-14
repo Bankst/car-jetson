@@ -9,10 +9,6 @@
 		target-path = "/";
 
 		__overlay__ {
-			serial@c280000 {
-				status = "okay";
-			};
-
 			sdhci@3440000 {
 				status = "okay";
 				uhs-mask = <0x00>;
