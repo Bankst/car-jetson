@@ -1,0 +1,438 @@
+#!/usr/bin/env bash
+# jtx — Jetson Xavier NX target toolkit
+# Target: root@192.168.55.1 via USB CDC-NCM (usb0 → l4tbr0 bridge, 192.168.55.1/24)
+
+set -euo pipefail
+
+TARGET="${JTX_TARGET:-root@192.168.55.1}"
+DEPLOY_DEB="${JTX_DEPLOY_DEB:-/mnt/yoctoworkspace/nx/car-jetson/build/tmp/deploy/deb}"
+SSH_OPTS=(-o ConnectTimeout=5 -o BatchMode=yes)
+
+_ssh() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
+_scp() { scp -o ConnectTimeout=5 "$@"; }
+
+_die()  { echo "jtx: error: $*" >&2; exit 1; }
+_bold() { printf '\033[1m%s\033[0m' "$*"; }
+_dim()  { printf '\033[2m%s\033[0m' "$*"; }
+_ok()   { printf '\033[32m%s\033[0m' "$*"; }
+_warn() { printf '\033[33m%s\033[0m' "$*"; }
+_err()  { printf '\033[31m%s\033[0m' "$*"; }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# health — device status dashboard
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_health() {
+    local raw
+    raw=$(_ssh '
+set -e
+
+# Thermal zones
+for z in /sys/class/thermal/thermal_zone*/; do
+    name=$(cat "${z}type" 2>/dev/null)
+    temp=$(cat "${z}temp" 2>/dev/null)
+    printf "THERM %s %s\n" "$name" "$temp"
+done
+
+# CPU load + uptime
+read la1 la5 la15 _ < /proc/loadavg
+printf "LOAD %s %s %s\n" "$la1" "$la5" "$la15"
+
+# CPU count
+printf "CPUS %s\n" "$(nproc)"
+
+# Memory
+awk "/^MemTotal/{t=\$2} /^MemAvailable/{a=\$2} END{printf \"MEM %d %d\\n\", t, a}" /proc/meminfo
+
+# Disk (rootfs)
+df --output=source,size,avail / | tail -1 | awk "{printf \"DISK %s %s %s\\n\", \$1, \$2, \$3}"
+
+# Network interfaces with IPs
+ip -4 addr show | awk "
+    /^[0-9]+: / { iface=\$2; sub(/:$/,\"\",iface) }
+    /inet / { printf \"IFACE %s %s\\n\", iface, \$2 }
+"
+
+# CAN0
+if [ -e /sys/class/net/can0 ]; then
+    state=$(cat /sys/class/net/can0/operstate 2>/dev/null || echo unknown)
+    rx=$(cat /sys/class/net/can0/statistics/rx_packets 2>/dev/null || echo 0)
+    tx=$(cat /sys/class/net/can0/statistics/tx_packets 2>/dev/null || echo 0)
+    err=$(cat /sys/class/net/can0/statistics/rx_errors 2>/dev/null || echo 0)
+    bitrate=$(ip -details link show can0 2>/dev/null | awk "/bitrate/{print \$2;exit}")
+    printf "CAN0 %s %s %s %s %s\n" "$state" "${bitrate:-?}" "$rx" "$tx" "$err"
+fi
+
+# SPI devices
+spidevs=$(ls /dev/spidev* 2>/dev/null | tr "\n" " ")
+printf "SPI %s\n" "${spidevs:-(none)}"
+
+# Serial devices
+serials=$(ls /dev/ttyTHS* /dev/ttyGS* 2>/dev/null | tr "\n" " ")
+printf "SERIAL %s\n" "${serials:-(none)}"
+
+# Failed systemd units
+failed=$(systemctl list-units --state=failed --no-legend 2>/dev/null | awk "{print \$1}" | tr "\n" " ")
+printf "FAILED %s\n" "${failed:-(none)}"
+
+# Uptime raw seconds
+awk "{printf \"UPTIME %.0f\\n\", \$1}" /proc/uptime
+')
+
+    # Parse and render
+    local title="── Jetson Xavier NX  $TARGET ──"
+    echo ""
+    _bold "$title"; echo ""
+    echo ""
+
+    # Thermals
+    _bold "Thermals"; echo ""
+    while IFS=' ' read -r tag name temp; do
+        [[ "$tag" != "THERM" ]] && continue
+        local deg=$(( temp / 1000 ))
+        local col
+        if   (( deg >= 75 )); then col=_err
+        elif (( deg >= 60 )); then col=_warn
+        else col=_ok; fi
+        printf "  %-18s %s\n" "$name" "$($col "${deg}°C")"
+    done <<< "$raw"
+
+    # Load / CPU
+    echo ""
+    _bold "CPU / Memory"; echo ""
+    local cpus load1 load5 load15 mem_total mem_avail
+    while IFS=' ' read -r tag a b c; do
+        case "$tag" in
+            LOAD)  load1=$a; load5=$b; load15=$c ;;
+            CPUS)  cpus=$a ;;
+        esac
+    done <<< "$raw"
+    local mem_line; mem_line=$(grep "^MEM " <<< "$raw")
+    mem_total=$(awk '{print $2}' <<< "$mem_line")
+    mem_avail=$(awk '{print $3}' <<< "$mem_line")
+    local mem_used=$(( (mem_total - mem_avail) / 1024 ))
+    local mem_total_mb=$(( mem_total / 1024 ))
+    printf "  Load (1/5/15):  %s / %s / %s  (%s CPUs)\n" "$load1" "$load5" "$load15" "$cpus"
+    printf "  Memory:         %d MB used / %d MB total\n" "$mem_used" "$mem_total_mb"
+
+    # Disk
+    local disk_line; disk_line=$(grep "^DISK " <<< "$raw")
+    local dev size_kb avail_kb
+    dev=$(awk '{print $2}' <<< "$disk_line")
+    size_kb=$(awk '{print $3}' <<< "$disk_line")
+    avail_kb=$(awk '{print $4}' <<< "$disk_line")
+    local size_gb=$(( size_kb / 1024 / 1024 ))
+    local avail_gb=$(( avail_kb / 1024 / 1024 ))
+    printf "  Disk (%s): %d GB free / %d GB total\n" "$dev" "$avail_gb" "$size_gb"
+
+    # Uptime
+    local uptime_sec; uptime_sec=$(grep "^UPTIME " <<< "$raw" | awk '{print $2}')
+    local udays=$(( uptime_sec / 86400 ))
+    local uhours=$(( (uptime_sec % 86400) / 3600 ))
+    local umins=$(( (uptime_sec % 3600) / 60 ))
+    printf "  Uptime:         %dd %dh %dm\n" "$udays" "$uhours" "$umins"
+
+    # Network
+    echo ""
+    _bold "Network"; echo ""
+    while IFS=' ' read -r tag iface ip; do
+        [[ "$tag" != "IFACE" ]] && continue
+        printf "  %-12s %s\n" "$iface" "$ip"
+    done <<< "$raw"
+
+    # CAN
+    echo ""
+    _bold "CAN0"; echo ""
+    local can_line; can_line=$(grep "^CAN0 " <<< "$raw" || true)
+    if [[ -n "$can_line" ]]; then
+        local cstate cbitrate crx ctx cerr
+        read -r _ cstate cbitrate crx ctx cerr <<< "$can_line"
+        local ccol; (( cerr > 0 )) && ccol=_warn || ccol=_ok
+        printf "  State:    %s\n" "$($ccol "$cstate")"
+        printf "  Bitrate:  %s bps\n" "$cbitrate"
+        printf "  RX/TX:    %s / %s pkts\n" "$crx" "$ctx"
+        printf "  RX errs:  %s\n" "$cerr"
+    else
+        printf "  %s\n" "$(_warn "can0 not found")"
+    fi
+
+    # SPI / Serial
+    echo ""
+    _bold "Peripherals"; echo ""
+    printf "  SPI:      %s\n" "$(grep "^SPI " <<< "$raw" | cut -d' ' -f2-)"
+    printf "  Serial:   %s\n" "$(grep "^SERIAL " <<< "$raw" | cut -d' ' -f2-)"
+
+    # Failed units
+    echo ""
+    local failed_line; failed_line=$(grep "^FAILED " <<< "$raw" | cut -d' ' -f2-)
+    if [[ "$failed_line" == "(none)" ]]; then
+        _ok "No failed systemd units"; echo ""
+    else
+        _err "Failed units:"; echo " $failed_line"
+    fi
+    echo ""
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# watch — live health refresh
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_watch() {
+    local interval="${1:-3}"
+    watch -n "$interval" -c "$(realpath "$0") health"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ssh — interactive SSH or run a command
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_ssh() {
+    if [[ $# -eq 0 ]]; then
+        ssh "${SSH_OPTS[@]/-o BatchMode=yes/}" "$TARGET"
+    else
+        _ssh "$@"
+    fi
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# push — deploy a .deb to the device and install it
+#
+# Usage:
+#   jtx push <recipe-name>          find newest .deb matching recipe, push + install
+#   jtx push <recipe> <service>     also restart a systemd service after install
+#   jtx push /path/to/foo.deb       push an explicit .deb file
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_push() {
+    [[ $# -lt 1 ]] && _die "usage: jtx push <recipe|deb> [service-to-restart]"
+    local arg="$1"
+    local service="${2:-}"
+    local debfile
+
+    if [[ "$arg" == *.deb && -f "$arg" ]]; then
+        debfile="$arg"
+    else
+        # Search deploy/deb tree for newest matching .deb
+        debfile=$(find "$DEPLOY_DEB" -name "${arg}_*.deb" -o -name "${arg}.deb" 2>/dev/null \
+            | sort -t_ -k2 -V | tail -1)
+        [[ -z "$debfile" ]] && _die "no .deb found for '$arg' under $DEPLOY_DEB"
+    fi
+
+    local fname; fname=$(basename "$debfile")
+    echo "Pushing: $debfile"
+    _scp "$debfile" "${TARGET}:/tmp/${fname}"
+    echo "Installing on device..."
+    _ssh "dpkg -i /tmp/${fname} && rm /tmp/${fname}"
+
+    if [[ -n "$service" ]]; then
+        echo "Restarting $service..."
+        _ssh "systemctl restart $service"
+        _ssh "systemctl is-active $service && echo 'service active' || echo 'service FAILED'"
+    fi
+    echo "Done."
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# logs — pull journald logs
+#
+# Usage:
+#   jtx logs                     last 200 lines from journal
+#   jtx logs -f                  follow journal
+#   jtx logs <unit>              last 200 lines from unit
+#   jtx logs -f <unit>           follow unit
+#   jtx logs -n <N> [unit]       last N lines
+#   jtx logs -b [unit]           this boot only
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_logs() {
+    local follow=0
+    local boot=0
+    local lines=200
+    local unit=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--follow) follow=1; shift ;;
+            -b|--boot)   boot=1; shift ;;
+            -n) lines="$2"; shift 2 ;;
+            -*) _die "unknown option: $1" ;;
+            *)  unit="$1"; shift ;;
+        esac
+    done
+
+    local jcmd="journalctl --no-pager -o short-precise"
+    [[ "$boot" -eq 1 ]] && jcmd+=" -b"
+    [[ -n "$unit" ]]    && jcmd+=" -u $unit"
+    [[ "$follow" -eq 1 ]] && jcmd+=" -f" || jcmd+=" -n $lines"
+
+    _ssh "$jcmd"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# dmesg — kernel ring buffer
+#
+# Usage:
+#   jtx dmesg              full dmesg
+#   jtx dmesg -f           follow (-w)
+#   jtx dmesg -e           errors+warnings only
+#   jtx dmesg -t           include timestamps (human readable)
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_dmesg() {
+    local follow=0
+    local erronly=0
+    local human=1
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--follow) follow=1; shift ;;
+            -e|--errors) erronly=1; shift ;;
+            -r|--raw)    human=0; shift ;;
+            -*) _die "unknown option: $1" ;;
+            *) _die "unexpected arg: $1" ;;
+        esac
+    done
+
+    local dcmd="dmesg"
+    [[ "$human" -eq 1 ]]   && dcmd+=" -T"
+    [[ "$erronly" -eq 1 ]] && dcmd+=" -l err,warn"
+    [[ "$follow" -eq 1 ]]  && dcmd+=" -w"
+
+    _ssh "$dcmd"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# can — CAN bus detail + live stats
+#
+# Usage:
+#   jtx can               status snapshot
+#   jtx can -f            follow stats every 2s
+#   jtx can dump          candump-style raw frame dump (needs can-utils)
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_can() {
+    local follow=0
+    local dump=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--follow) follow=1; shift ;;
+            dump) dump=1; shift ;;
+            -*) _die "unknown option: $1" ;;
+            *) _die "unexpected arg: $1" ;;
+        esac
+    done
+
+    if [[ "$dump" -eq 1 ]]; then
+        _die "candump not implemented; run: jtx ssh candump can0"
+    fi
+
+    local script='
+iface=can0
+if [ ! -e /sys/class/net/$iface ]; then echo "can0 not found"; exit 1; fi
+echo "--- $iface detail ---"
+ip -details link show $iface
+echo ""
+echo "--- statistics ---"
+for f in /sys/class/net/$iface/statistics/*; do
+    v=$(cat "$f")
+    [ "$v" -ne 0 ] 2>/dev/null && printf "  %-28s %s\n" "$(basename $f)" "$v"
+done
+'
+
+    if [[ "$follow" -eq 1 ]]; then
+        watch -n 2 "ssh ${SSH_OPTS[*]} $TARGET '$script'"
+    else
+        _ssh "$script"
+    fi
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# spi — SPI device info
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_spi() {
+    _ssh 'ls -la /dev/spidev*; echo ""; for d in /sys/bus/spi/devices/*/; do echo "$(basename $d): $(cat ${d}modalias 2>/dev/null)"; done'
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# reboot / poweroff — controlled device restart
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_reboot() {
+    read -r -p "Reboot $TARGET? [y/N] " ans
+    [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+    _ssh "systemctl reboot" || true
+    echo "Reboot sent. SSH will drop."
+}
+
+cmd_poweroff() {
+    read -r -p "Power off $TARGET? [y/N] " ans
+    [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+    _ssh "systemctl poweroff" || true
+    echo "Poweroff sent."
+}
+
+cmd_reboot_recovery() {
+    read -r -p "Reboot $TARGET into forced-recovery mode? [y/N] " ans
+    [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+    _ssh "reboot forced-recovery" || true
+    echo "Forced-recovery reboot sent. Device will appear as 0955:7e19 on USB."
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ping — quick reachability check
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_ping() {
+    if _ssh "echo ok" 2>/dev/null | grep -q ok; then
+        _ok "reachable"; echo " ($TARGET)"
+    else
+        _err "unreachable"; echo " ($TARGET)"
+        exit 1
+    fi
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# help
+# ──────────────────────────────────────────────────────────────────────────────
+cmd_help() {
+    cat <<'EOF'
+jtx — Jetson target toolkit
+
+Usage: jtx <command> [options]
+
+Commands:
+  health              device status dashboard (thermals, CPU, mem, disk, net, CAN)
+  watch [interval]    live-refresh health (default: 3s)
+  ping                check if device is reachable via SSH
+
+  ssh [cmd]           interactive SSH, or run a command remotely
+  push <recipe|deb> [svc]  push latest .deb to device and dpkg-install; optionally restart service
+  logs [-f] [-b] [-n N] [unit]  journald logs (follow, this-boot, N lines, or unit filter)
+  dmesg [-f] [-e] [-r]          kernel ring buffer (follow, errors-only, raw timestamps)
+
+  can [-f]            CAN0 detail + nonzero statistics; -f for live refresh
+  spi                 SPI device listing
+  reboot              reboot device (prompts for confirmation)
+  reboot-recovery     reboot into forced-recovery mode for flashing (prompts for confirmation)
+  poweroff            power off device (prompts for confirmation)
+
+Environment:
+  JTX_TARGET      SSH target (default: root@192.168.55.1)
+  JTX_DEPLOY_DEB  path to build/tmp/deploy/deb (default: /mnt/yoctoworkspace/nx/car-jetson/build/tmp/deploy/deb)
+EOF
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# dispatch
+# ──────────────────────────────────────────────────────────────────────────────
+cmd="${1:-health}"
+[[ $# -gt 0 ]] && shift || true
+
+case "$cmd" in
+    health)   cmd_health "$@" ;;
+    watch)    cmd_watch "$@" ;;
+    ping)     cmd_ping "$@" ;;
+    ssh)      cmd_ssh "$@" ;;
+    push)     cmd_push "$@" ;;
+    logs)     cmd_logs "$@" ;;
+    dmesg)    cmd_dmesg "$@" ;;
+    can)      cmd_can "$@" ;;
+    spi)      cmd_spi "$@" ;;
+    reboot)            cmd_reboot "$@" ;;
+    reboot-recovery)   cmd_reboot_recovery "$@" ;;
+    poweroff)          cmd_poweroff "$@" ;;
+    help|-h|--help) cmd_help ;;
+    *) _die "unknown command '$cmd'. Run: jtx help" ;;
+esac
