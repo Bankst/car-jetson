@@ -1,3 +1,2 @@
 #include "tegra194-p3668-all-p3509-0000.dts"
 #include "a203-sd.dtsi"
-#include "a203-serial.dtsi"
