@@ -1,0 +1,25 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	overlay-name = "Seeed A203 V2 Carrier Board";
+	compatible = "nvidia,tegra194";
+
+	fragment@0 {
+		target-path = "/";
+
+		__overlay__ {
+			serial@c280000 {
+				status = "okay";
+			};
+
+			sdhci@3440000 {
+				status = "okay";
+				uhs-mask = <0x00>;
+				no-sdio;
+				no-mmc;
+				cd-gpios = <&tegra_main_gpio 0x82 0x00>;
+			};
+		};
+	};
+};
