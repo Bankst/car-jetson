@@ -22,4 +22,12 @@
 			};
 		};
 	};
+
+	fragment@1 {
+		target-path = "/aliases";
+
+		__overlay__ {
+			sdhci_card = "/sdhci@3440000";
+		};
+	};
 };
