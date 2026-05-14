@@ -1,0 +1,26 @@
+Subject: [PATCH] icecc.bbclass: bail silently instead of fatal on NULL HOST_PREFIX
+
+Some recipes (e.g. target-sdk-provides-dummy) override PACKAGE_ARCH so
+icecc_is_allarch returns False even though the recipe inherits allarch
+and has no real toolchain. Their HOST_PREFIX is empty, which triggers
+bb.fatal during vardep walk of set_icecc_env and aborts parsing.
+
+Returning "" here lets the shell wrapper's
+    bbwarn "Cannot use icecc: could not get ICECC_VERSION"
+path handle it gracefully.
+
+diff --git a/meta/classes/icecc.bbclass b/meta/classes/icecc.bbclass
+--- a/meta/classes/icecc.bbclass
++++ b/meta/classes/icecc.bbclass
+@@ -212,7 +212,10 @@ def icecc_version(bb, d):
+     if icecc_is_native(bb, d):
+         archive_name = "local-host-env"
+     elif d.expand('${HOST_PREFIX}') == "":
+-        bb.fatal(d.expand("${PN}"), " NULL prefix")
++        # Recipes that override PACKAGE_ARCH (e.g. target-sdk-provides-dummy)
++        # leak past icecc_is_allarch but still have an empty HOST_PREFIX.
++        # Bail silently instead of fatal-ing parsing.
++        return ""
+     else:
+         prefix = d.expand('${HOST_PREFIX}' )
+         distro = d.expand('${DISTRO}')

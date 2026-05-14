@@ -21,6 +21,8 @@ RDEPENDS:${PN} = " \
     \
     bluez5 \
     wireless-regdb-static \
+    linux-firmware-qca \
+    bt-audio-agent \
     \
     pipewire \
     pipewire-alsa \

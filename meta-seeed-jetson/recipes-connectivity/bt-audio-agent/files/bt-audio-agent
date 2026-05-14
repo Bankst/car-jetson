@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+import dbus
+import dbus.service
+import dbus.mainloop.glib
+import ctypes
+import os
+import sys
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(name)s %(levelname)s %(message)s',
+    stream=sys.stdout,
+)
+log = logging.getLogger('bt-audio-agent')
+
+PIN_FILE      = '/etc/bluetooth/pin'
+DEFAULT_PIN   = '1234'
+AGENT_PATH    = '/org/bluez/bt_audio_agent'
+AGENT_IFACE   = 'org.bluez.Agent1'
+ADAPTER_IFACE = 'org.bluez.Adapter1'
+
+
+def read_pin():
+    try:
+        pin = open(PIN_FILE).read().strip()
+        if pin:
+            return pin
+    except FileNotFoundError:
+        pass
+    return DEFAULT_PIN
+
+
+class BtAudioAgent(dbus.service.Object):
+    def __init__(self, bus, path):
+        super().__init__(bus, path)
+        self._pin = read_pin()
+        log.info('Agent ready, PIN configured (%d chars)', len(self._pin))
+
+    @dbus.service.method(AGENT_IFACE, in_signature='o', out_signature='s')
+    def RequestPinCode(self, device):
+        log.info('RequestPinCode from %s', device)
+        return self._pin
+
+    @dbus.service.method(AGENT_IFACE, in_signature='o', out_signature='u')
+    def RequestPasskey(self, device):
+        log.info('RequestPasskey from %s', device)
+        try:
+            return dbus.UInt32(int(self._pin))
+        except ValueError:
+            return dbus.UInt32(1234)
+
+    @dbus.service.method(AGENT_IFACE, in_signature='ou', out_signature='')
+    def RequestConfirmation(self, device, passkey):
+        log.info('RequestConfirmation from %s passkey=%06d — accepted', device, passkey)
+
+    @dbus.service.method(AGENT_IFACE, in_signature='o', out_signature='')
+    def RequestAuthorization(self, device):
+        log.info('RequestAuthorization from %s — accepted', device)
+
+    @dbus.service.method(AGENT_IFACE, in_signature='os', out_signature='')
+    def AuthorizeService(self, device, uuid):
+        log.info('AuthorizeService from %s uuid=%s — accepted', device, uuid)
+
+    @dbus.service.method(AGENT_IFACE, in_signature='os', out_signature='')
+    def DisplayPinCode(self, device, pincode):
+        log.info('DisplayPinCode from %s pin=%s', device, pincode)
+
+    @dbus.service.method(AGENT_IFACE, in_signature='ouq', out_signature='')
+    def DisplayPasskey(self, device, passkey, entered):
+        log.info('DisplayPasskey from %s passkey=%06d entered=%d', device, passkey, entered)
+
+    @dbus.service.method(AGENT_IFACE, in_signature='', out_signature='')
+    def Cancel(self):
+        log.info('Cancel')
+
+
+def setup_adapter(bus):
+    manager = dbus.Interface(
+        bus.get_object('org.bluez', '/'),
+        'org.freedesktop.DBus.ObjectManager'
+    )
+    objs = manager.GetManagedObjects()
+    found = False
+    for path, ifaces in objs.items():
+        if ADAPTER_IFACE not in ifaces:
+            continue
+        props = dbus.Interface(
+            bus.get_object('org.bluez', path),
+            'org.freedesktop.DBus.Properties'
+        )
+        props.Set(ADAPTER_IFACE, 'Powered',             dbus.Boolean(True))
+        props.Set(ADAPTER_IFACE, 'Discoverable',        dbus.Boolean(True))
+        props.Set(ADAPTER_IFACE, 'DiscoverableTimeout', dbus.UInt32(0))
+        props.Set(ADAPTER_IFACE, 'Pairable',            dbus.Boolean(True))
+        props.Set(ADAPTER_IFACE, 'PairableTimeout',     dbus.UInt32(0))
+        name = os.environ.get('BT_DEVICE_NAME', '').strip()
+        if name:
+            props.Set(ADAPTER_IFACE, 'Alias', name)
+        addr = ifaces[ADAPTER_IFACE].get('Address', 'unknown')
+        log.info('Adapter %s (%s): powered, discoverable, pairable', path, addr)
+        found = True
+    if not found:
+        log.error('No Bluetooth adapter found — exiting')
+        sys.exit(1)
+
+
+def main():
+    dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+    bus = dbus.SystemBus()
+
+    setup_adapter(bus)
+
+    agent = BtAudioAgent(bus, AGENT_PATH)
+
+    mgr = dbus.Interface(
+        bus.get_object('org.bluez', '/org/bluez'),
+        'org.bluez.AgentManager1'
+    )
+    mgr.RegisterAgent(AGENT_PATH, 'KeyboardDisplay')
+    mgr.RequestDefaultAgent(AGENT_PATH)
+    log.info('Registered as default BlueZ agent (KeyboardDisplay)')
+
+    _glib = ctypes.CDLL('libglib-2.0.so.0')
+    _glib.g_main_loop_new.restype = ctypes.c_void_p
+    _glib.g_main_loop_new.argtypes = [ctypes.c_void_p, ctypes.c_bool]
+    _glib.g_main_loop_run.argtypes = [ctypes.c_void_p]
+    _loop = _glib.g_main_loop_new(None, False)
+    _glib.g_main_loop_run(_loop)
+
+
+if __name__ == '__main__':
+    main()
