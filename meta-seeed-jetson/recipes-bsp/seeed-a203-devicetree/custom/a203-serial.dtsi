@@ -1,9 +1,0 @@
-/ {
-	serial@c280000 {
-		status = "okay";
-	};
-
-	chosen {
-		bootargs = "console=ttyTCU0,115200 console=ttyTHS2,115200";
-	};
-};
