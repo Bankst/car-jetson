@@ -1,5 +1,7 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/files:"
 
+ICECC_DISABLED = "1"
+
 SRC_URI += " \
     file://sshd_config \
     file://sshd.service \
