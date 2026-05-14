@@ -1,0 +1,15 @@
+UsePAM no
+UseDNS no
+KexAlgorithms curve25519-sha256,ecdh-sha2-nistp256
+
+PermitRootLogin yes
+PermitEmptyPasswords yes
+PasswordAuthentication yes
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+
+Compression no
+ClientAliveInterval 15
+ClientAliveCountMax 4
+
+Subsystem sftp /usr/lib/openssh/sftp-server
