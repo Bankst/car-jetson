@@ -218,5 +218,5 @@ After reboot: USB-A203 micro-USB to host PC creates a CDC-NCM ethernet (host get
 
 ## Memory
 
-Auto-memory for this project lives at `~/.claude/projects/-home-bankst-projects-nx/memory/`. Three files there:
+Auto-memory for this project lives at `~/.claude/projects/-mnt-yoctoworkspace-nx-car-jetson/memory/`. Three files there:
 `user_banks.md`, `project_banks_jetson_linux.md`, `reference_kas_container_selinux.md`. They cover the same material as this CLAUDE.md but persist across all sessions, including ones outside this directory.
