@@ -25,6 +25,14 @@ banks_bake_unit_fixes() {
         ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/${unit}
     done
 
+    # Use pre-forked sshd (not socket-activated) — eliminates PAM thread IPC overhead.
+    # UsePAM no in sshd_config means OpenSSH handles passwords natively; no logind
+    # session needed (linger handles /run/user/UID for XDG).
+    ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/sshd.socket
+    install -d ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/multi-user.target.wants
+    ln -sf /lib/systemd/system/sshd.service \
+        ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/multi-user.target.wants/sshd.service
+
     # nvs-service: drop network-online.target dependency (sensor HAL idle on A203)
     install -d ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/nvs-service.service.d
     printf '[Unit]\nAfter=\nWants=\nAfter=nvstartup.service\n' \

@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenSSH Daemon
+After=network.target sshdgenkeys.service
+Wants=sshdgenkeys.service
+Conflicts=sshd.socket
+
+[Service]
+ExecStart=/usr/sbin/sshd -D
+KillMode=process
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
