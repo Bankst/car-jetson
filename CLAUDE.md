@@ -197,6 +197,16 @@ After reboot: USB-A203 micro-USB to host PC creates a CDC-NCM ethernet (host get
 
 13. **`~/bstat` script for build status without prompting Claude.** Quick tail of the most recent `/tmp/r3-build-*.log` with error count. See the script at `~/bstat`.
 
+14. **SSH login latency — root cause and fix.** Fresh SSH login was ~1.85s. Investigation (via strace bisection of PAM modules) revealed three compounding causes:
+    - **pam_unix in PAM auth stack**: OpenSSH with `UsePAM yes` always runs `pam_authenticate()` in a dedicated pthread, communicating via a pipe IPC with the main sshd thread. pam_unix triggers this conversation mechanism even for pubkey/empty-password logins, adding ~0.6s on every connection regardless of auth method. Fix: **`UsePAM no`** — OpenSSH handles passwords natively via `/etc/shadow`; no PAM thread, no IPC.
+    - **sntrup761 post-quantum KEX**: OpenSSH 9.x defaults to `sntrup761x25519-sha512` for key exchange. This hybrid post-quantum algorithm is expensive on ARM Carmel, adding ~170ms. Fix: `KexAlgorithms curve25519-sha256,ecdh-sha2-nistp256` in sshd_config.
+    - **Socket-activated sshd**: `sshd.socket` + `sshd@.service` spawns a new sshd process per connection. Fix: pre-forked `sshd.service` (`sshd -D`); `sshd.socket` masked in image.
+    - Result: **~0.20s** fresh pubkey login. Password auth works natively with `UsePAM no` + `PasswordAuthentication yes`.
+    - `UsePrivilegeSeparation no` was also tested (~100ms saving) but the option was removed in OpenSSH 9.x — don't add it to sshd_config, sshd will refuse to start.
+    - Logind session tracking lost with `UsePAM no` (no pam_systemd). XDG `/run/user/UID` covered by `loginctl enable-linger <user>`.
+    - Baked in: `meta-seeed-jetson/recipes-connectivity/openssh/openssh_%.bbappend` ships custom `sshd_config` + `sshd.service`; image recipe masks `sshd.socket` and enables `sshd.service`.
+    - **Strace artifacts**: measuring with `strace -e trace=all` caused `close_range()` to fail under ptrace → sshd fell back to 65535-iteration `close()` loop, making strace look like the bottleneck. Always filter strace traces (`-e trace=close,close_range` etc.) when measuring timing.
+
 ## Open follow-ups
 
 - Verify CAN0 actually comes up at 500kbps on hardware (NM 1.46 `[can]` keyfile syntax — empirically untested for us yet).
