@@ -1,0 +1,16 @@
+[Unit]
+Description=Bluetooth fixed-PIN A2DP sink agent
+Documentation=https://git.kernel.org/pub/scm/bluetooth/bluez.git
+After=bluetooth.service
+BindsTo=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/bt-audio-agent
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=bluetooth.target
