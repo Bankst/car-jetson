@@ -165,6 +165,114 @@ sudo ./initrd-flash --erase-nvme            # ~5–15 min, then module reboots a
 
 After reboot: USB-A203 micro-USB to host PC creates a CDC-NCM ethernet (host gets a `192.168.55.x` IP via the Jetson's NM `shared` DHCP) and a CDC-ACM serial. SSH `ssh root@192.168.55.1` (passwordless via `debug-tweaks` for now).
 
+## Hardware notes
+
+- No analog audio output on A203 V2 carrier — HDMI (card 0) and ADMAIF I2S (card 1, 20x XBAR-ADMAIF only)
+- Serial console: ttyTHS0 at 115200, 40-pin header pins 8 (TX) / 10 (RX)
+- SSH: `ssh root@192.168.55.1` — passwordless, authorized_keys installed
+- SSH keys: `~/.ssh/id_rsa` (bankst@bankst-workstation) and `~/.ssh/id_ed25519_personal` (btrout.dhrs@gmail.com / GitHub) both in root + bankst authorized_keys
+
+## Target tooling — jtx
+
+Single-file script at `car-jetson/jtx`, symlinked to `~/.local/bin/jtx` (in PATH).
+
+| Command | Notes |
+|---|---|
+| `jtx` / `jtx health` | Dashboard: thermals (≥60°C warn, ≥75°C err), load, mem, disk, uptime, network IPs, CAN0 bitrate/stats, SPI/serial devices, failed units |
+| `jtx watch [N]` | Live-refresh health every N sec (default 3) |
+| `jtx ping` | SSH reachability check |
+| `jtx ssh [cmd]` | Interactive SSH or remote command |
+| `jtx push <recipe\|deb> [svc]` | Find newest `.deb` under `build/tmp/deploy/deb/`, scp + dpkg-install; optionally restart service |
+| `jtx logs [-f] [-b] [-n N] [unit]` | journald; follow, this-boot, N lines, unit filter |
+| `jtx dmesg [-f] [-e]` | dmesg; `-f` follow, `-e` errors+warnings only |
+| `jtx can [-f]` | CAN0 detail + nonzero stats; `-f` live refresh |
+| `jtx spi` | SPI device listing |
+| `jtx reboot` | Reboot (confirm prompt) |
+| `jtx reboot-recovery` | `reboot forced-recovery` → device appears as USB 0955:7e19 for flashing |
+| `jtx poweroff` | Power off (confirm prompt) |
+
+Override: `JTX_TARGET=root@<ip>`, `JTX_DEPLOY_DEB=<path>`.
+
+## Bluetooth A2DP Sink
+
+Full BT audio sink stack baked into meta-seeed-jetson (commit 9beb609).
+
+### Recipes
+- `recipes-connectivity/bt-audio-agent/` — Python3 D-Bus pairing agent
+  - KeyboardDisplay capability → Numeric Comparison → auto-accepts RequestConfirmation
+  - Fixed PIN from `/etc/bluetooth/pin` (default 1234)
+  - GLib mainloop via ctypes (avoids python3-pygobject/cairo dep chain)
+  - `g_main_loop_new.restype = c_void_p` — critical on aarch64 (64-bit ptr)
+- `recipes-connectivity/libfreeaptx/libfreeaptx_0.2.2.bb` — aptX/aptX-HD (regularhunter fork, LGPL)
+- `recipes-connectivity/libldac/libldac_git.bb` — LDAC 990kbps (EHfive/ldacBT, gitsm://)
+- `recipes-multimedia/pipewire/pipewire_%.bbappend` — `bluez-aac bluez-aptx bluez-ldac` PACKAGECONFIG
+- `recipes-multimedia/wireplumber/wireplumber_%.bbappend` — all headless fixes (see below)
+
+### WirePlumber headless fixes
+WirePlumber is designed for user sessions (logind seat). On headless system service, three things break:
+
+1. `DBUS_SESSION_BUS_ADDRESS` unset → `dbus-connection` module fails to load → cascading skips
+   - Fix: service drop-in `Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket`
+2. `monitor.bluez.seat-monitoring` loads → sees `seat=offline` → BT monitor DEACTIVATED
+   - Fix: `10-headless-bt.conf`: `monitor.bluez.seat-monitoring = disabled`
+3. pipewire user (home=`/`) can't create `/.local/state/wireplumber`
+   - Fix: `tmpfiles.d/wireplumber-state.conf` creates `/.local/state/wireplumber` owned by pipewire
+
+### HFP cycling fix
+Workstation Handsfree profile triggers HFP connection → WirePlumber creates `bluez_input.<mac>.N` → can't find ALSA sink → 5s timeout → destroy → repeat = rescan storm.
+- Fix: `20-bt-a2dp-only.conf`: `bluez5.profiles = [a2dp-sink]`, `autoswitch-to-headset-profile = false`
+- Fix: `pipewire.conf.d/10-null-sink.conf`: null-audio-sink fallback
+
+### Codec status
+| Codec | Status |
+|-------|--------|
+| SBC / SBC-XQ | ✓ built-in |
+| AAC | ✓ fdk-aac via bluez-aac PACKAGECONFIG |
+| Opus | ✓ built-in |
+| aptX / aptX-HD | ✓ libfreeaptx recipe; pipewire shows "not available" until full image rebuild |
+| LDAC | ✓ libldac recipe; same |
+
+QCA BT firmware: `linux-firmware-qca` in packagegroup (rampatch_usb_00000302.bin).
+
+Pairing: modern devices use SSP → KeyboardDisplay → Numeric Comparison → agent auto-accepts. KeyboardOnly triggers Passkey Entry → agent returns wrong fixed value → pairing fails.
+
+## SD Card / DeviceTree
+
+### How DTB reaches kernel
+- UEFI (L4TLauncher / `bootaa64.efi`) does **not** load from `kernel-dtb` NVMe partition at runtime — MB2/firmware loads from QSPI, bypassing NVMe entirely.
+- `kernel-dtb` and `kernel-dtb_b` NVMe partitions exist but are ignored by the running UEFI chain.
+- **Fix**: `FDT` line in `/boot/extlinux/extlinux.conf` — L4TLauncher honors this and loads from rootfs.
+- Baked via `UBOOT_EXTLINUX_FDT = "/boot/devicetree/tegra194-p3668-a203.dtb"` in `conf/machine/jetson-xavier-nx-a203.conf`.
+
+### Custom DTB recipe
+- `meta-seeed-jetson/recipes-bsp/seeed-a203-devicetree/` — `inherit devicetree`, compiles full DTB.
+- Source: `tegra194-p3668-a203.dts` includes `tegra194-p3668-all-p3509-0000.dts` then `a203-sd.dtsi`.
+- Installs to `/boot/devicetree/tegra194-p3668-a203.dtb` on rootfs.
+- `PREFERRED_PROVIDER_virtual/dtb = "seeed-a203-devicetree"` in machine conf.
+
+### SD card (sdhci@3440000 = mmc2)
+- CD GPIO: PQ.02 (`&tegra_main_gpio 0x82`) — physically low when card inserted.
+- Correct polarity: `cd-gpios = <&tegra_main_gpio 0x82 0x00>` (GPIO_ACTIVE_HIGH) + `cd-inverted;` from base DTB.
+  - Base DTB already has `cd-inverted;` on sdhci@3440000 — this toggles gpiod active level = effective ACTIVE_LOW.
+  - `GPIO_ACTIVE_LOW` (0x01) + `cd-inverted` = double inversion = **wrong** (don't do this).
+- dmesg when working: `sdhci-tegra 3440000.sdhci: Got CD GPIO` then card enumerated as `mmc2` / `mmcblk2`.
+
+### DTB deploy (no reflash needed)
+```sh
+# Build
+kas-container (icecc) shell kas/base.yml -c "bitbake seeed-a203-devicetree"
+# Push (reboot required — extlinux.conf read at boot by L4TLauncher)
+jtx push seeed-a203-devicetree
+```
+
+### icecc required for kernel configure
+`INHERIT += "icecc"` in `build/conf/local.conf` — kernel `do_configure` fails without icecc daemon running. Always use `kas-icecc:4.7` container with `--network=host` and `-v /run/icecc:/var/run/icecc:rw` for any build touching linux-tegra. Regular `kas-container shell` without icecc socket mount = kernel configure fails with "unknown assembler invoked".
+
+### Force-rebuild a recipe bypassing sstate
+```sh
+kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbake -f -c do_package <recipe> && bitbake -f -c do_package_write_deb <recipe>"
+```
+
 ## Non-obvious workarounds in this repo (so future-you/me doesn't redo them)
 
 1. **`KAS_RUNTIME_ARGS="--security-opt label=disable"`** is mandatory on Fedora enforcing. Without it the kas-container can't read `/repo` due to SELinux MCS labelling on bind mounts. Only mode that works is disabling label confinement for the container; `:Z` mount option fights kas-container's own `-v` lines.
@@ -209,12 +317,14 @@ After reboot: USB-A203 micro-USB to host PC creates a CDC-NCM ethernet (host get
 
 ## Open follow-ups
 
-- Verify CAN0 actually comes up at 500kbps on hardware (NM 1.46 `[can]` keyfile syntax — empirically untested for us yet).
-- Verify `/dev/spidevX.Y` is exposed at runtime; depends on whether Seeed's A203 DTB enables an `spidev` child node on a SPI controller. If not, add a DT overlay.
-- Replace `debug-tweaks` (passwordless root) with a proper user account once dev workflow is settled.
-- Plasma image (`kas/plasma.yml`) build hasn't been attempted yet. Expect KDE Plasma 6 Wayland to work via KWin; first time on Tegra so sharp edges are likely.
+- ~~CAN0 500kbps~~ — **confirmed** UP at 500000bps, ERROR-ACTIVE, 0 bus errors at idle (via `jtx can`).
+- ~~spidev exposed~~ — **confirmed** spidev0.0, spidev0.1, spidev2.0, spidev2.1 present.
+- Full image rebuild to bake aptX/LDAC codec debs (libfreeaptx, libldac recipes present but not yet in a pushed image).
+- I2S DAC wiring for actual audio output — currently routes to null sink.
+- Replace `debug-tweaks` (passwordless root) with proper user account once dev workflow settled.
+- Plasma image (`kas/plasma.yml`) build not yet attempted. Expect KDE Plasma 6 Wayland via KWin; first time on Tegra so sharp edges likely.
 - LXQt variant kas/recipe pair when ready.
-- sstate mirror is still TODO.
+- sstate mirror TODO.
 
 ## Memory
 
