@@ -1,0 +1,13 @@
+[Unit]
+Description=Kiosk Wayland session (weston + app)
+After=systemd-udevd.service
+
+[Service]
+ExecStart=/etc/kiosk/kiosk-launcher
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target

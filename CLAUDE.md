@@ -36,6 +36,7 @@ Built and flash-tested. Boot from eMMC, rootfs on external NVMe (M.2 Key M 2242)
 ```
 kas/
   base.yml          # poky + meta-oe + meta-tegra + machine; DE-agnostic
+  kiosk.yml         # includes base.yml; adds Xorg + matchbox-wm + kiosk session; selects kiosk image
   plasma.yml        # includes base.yml; adds Qt6 + KF6 + KDE; selects plasma image
   lxqt.yml          # placeholder, future LXQt variant
 
@@ -58,6 +59,8 @@ meta-seeed-jetson/
       l4t-gadget-usb0.nmconnection        # NM keyfile: usb0 as bridge slave
       can0.nmconnection                   # CAN0 at 500kbps
       seeed-a203-modules.conf             # /etc/modules-load.d/ — mttcan, can*, spidev
+  recipes-graphics/
+    banks-kiosk/                          # kiosk session: kiosk.service + xinitrc + kiosk-app placeholder (xterm -fullscreen)
   recipes-kernel/linux/
     linux-tegra_%.bbappend                # injects 4 config fragments + DTB substitution at do_deploy
     linux-tegra/can.cfg                   # CAN_*, MTTCAN
@@ -65,8 +68,8 @@ meta-seeed-jetson/
     linux-tegra/usb-modem.cfg             # CDC_NCM, USB_SERIAL_OPTION, USB_WDM (cellular USB modems, off by default)
     linux-tegra/usb-gadget.cfg            # USB_GADGET, CONFIGFS_*, NCM/ACM/RNDIS/ECM
   recipes-core/
-    images/banks-jetson-image-{base,plasma,lxqt}.bb
-    packagegroups/{packagegroup-seeed-base, packagegroup-de-plasma-minimal}.bb
+    images/banks-jetson-image-{base,kiosk,plasma,lxqt}.bb
+    packagegroups/{packagegroup-seeed-base, packagegroup-kiosk, packagegroup-de-plasma-minimal}.bb
 
 _input/
   203_jp514.tar.gz                        # Seeed's A203 driver pack for JP 5.1.4 (Xavier NX)
@@ -322,6 +325,7 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
 - Full image rebuild to bake aptX/LDAC codec debs (libfreeaptx, libldac recipes present but not yet in a pushed image).
 - I2S DAC wiring for actual audio output — currently routes to null sink.
 - Replace `debug-tweaks` (passwordless root) with proper user account once dev workflow settled.
+- Kiosk image (`kas/kiosk.yml`) recipes written, **not yet built/flashed**. X11 + matchbox-wm + xinit + xterm placeholder. Build: `kas-container build kas/kiosk.yml`. Replace `/etc/kiosk/kiosk-app` for real app. Potential issue: Tegra X11 EGL — may need additional `tegra-libraries-xorg` or similar package from meta-tegra if Xorg can't initialize the NVIDIA EGL backend; investigate on first boot.
 - Plasma image (`kas/plasma.yml`) build not yet attempted. Expect KDE Plasma 6 Wayland via KWin; first time on Tegra so sharp edges likely.
 - LXQt variant kas/recipe pair when ready.
 - sstate mirror TODO.

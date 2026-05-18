@@ -1,0 +1,27 @@
+#!/bin/sh
+# Start weston (NVDC/DRM backend auto-selected) then run kiosk-app.
+# Weston uses meta-tegra's libdrm-nvdc for NVIDIA Tegra display on L4T R35.
+export XDG_RUNTIME_DIR=/run/kiosk
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 0700 "$XDG_RUNTIME_DIR"
+
+weston --socket=wayland-kiosk --tty=7 &
+WPID=$!
+
+# Wait up to 10s for Wayland socket
+i=0
+while [ $i -lt 100 ]; do
+    [ -S "${XDG_RUNTIME_DIR}/wayland-kiosk" ] && break
+    sleep 0.1
+    i=$((i+1))
+done
+
+if ! [ -S "${XDG_RUNTIME_DIR}/wayland-kiosk" ]; then
+    echo "kiosk: weston socket not ready after 10s" >&2
+    kill "$WPID" 2>/dev/null
+    exit 1
+fi
+
+WAYLAND_DISPLAY=wayland-kiosk /etc/kiosk/kiosk-app
+kill "$WPID" 2>/dev/null
+wait "$WPID" 2>/dev/null

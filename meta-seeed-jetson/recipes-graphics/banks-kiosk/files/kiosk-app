@@ -1,0 +1,4 @@
+#!/bin/sh
+# Placeholder kiosk application (Wayland-native via weston-terminal).
+# Replace with real binary, e.g.: /usr/bin/my-qt-app or chromium-browser --kiosk
+exec /usr/bin/weston-terminal --fullscreen

@@ -1,0 +1,6 @@
+header:
+  version: 14
+  includes:
+    - base.yml
+
+target: banks-jetson-image-kiosk
