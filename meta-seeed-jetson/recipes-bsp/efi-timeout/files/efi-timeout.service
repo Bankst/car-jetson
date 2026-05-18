@@ -1,0 +1,12 @@
+[Unit]
+Description=Set UEFI boot timeout to 0
+After=local-fs.target
+ConditionPathExists=!/var/lib/efi-timeout-configured
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/efi-timeout.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
