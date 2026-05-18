@@ -1,0 +1,4 @@
+#!/bin/sh
+# matchbox-wm: no titlebars, no taskbar — pure kiosk frame
+matchbox-wm -use_titlebar no &
+exec /etc/kiosk/kiosk-app
