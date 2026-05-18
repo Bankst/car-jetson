@@ -15,7 +15,7 @@ Built and flash-tested. Boot from eMMC, rootfs on external NVMe (M.2 Key M 2242)
 | DISTRO | `banks-jetson` | Banks's flavour, defined in `meta-seeed-jetson/conf/distro/banks-jetson.conf` |
 | Init | systemd | |
 | Networking | NetworkManager (default) + systemd-networkd (kept available for nothing in particular; networkd is currently masked from owning anything) | NM owns Ethernet/Wi-Fi/USB-gadget bridge; CAN0 brought up at 500kbps via NM keyfile (NM 1.46+ has [can] section) |
-| DE | KDE Plasma 6 / KF6 / Qt6 (separate target `kas/plasma.yml`) | Decoupled — base image is DE-agnostic, swap to LXQt later by adding one packagegroup + one image recipe + one kas yaml |
+| DE | Weston 10 kiosk (`kas/kiosk.yml`) or KDE Plasma 6 (`kas/plasma.yml`) | Decoupled — base image is DE-agnostic. Kiosk: built+flashed, working. Plasma: not yet built. |
 | Bootloader | **`tegra-uefi-prebuilt`** (NVIDIA-shipped UEFI binary) | source-build EDK2 (`edk2-firmware-tegra`) fails on scarthgap GCC 13 with GenFw PE-COFF errors; prebuilt avoids the issue and is what NVIDIA officially ships |
 | Storage | Boot/UEFI on QSPI/eMMC, rootfs on `/dev/nvme0n1p1` | `TNSPEC_BOOTDEV` in MACHINE conf, `EXTERNAL_ROOTFS_DRIVE=1` |
 
@@ -76,6 +76,31 @@ _input/
   extracted/                              # untracked; staging for the few files we actually use
   *_WRONG-BOARD-Orin-A603                 # the Orin tarball we got first by mistake; renamed for safety
 ```
+
+## Image targets
+
+| kas yaml | Image recipe | Status |
+|---|---|---|
+| `kas/base.yml` | `banks-jetson-image-base` | ✓ Built, flashed, daily-driver |
+| `kas/kiosk.yml` | `banks-jetson-image-kiosk` | ✓ Built, flashed, working |
+| `kas/plasma.yml` | `banks-jetson-image-plasma` | Not yet built |
+| `kas/lxqt.yml` | `banks-jetson-image-lxqt` | Placeholder |
+
+### Kiosk image — display stack notes
+
+L4T R35 (JP5) dropped the X11 DDX driver. `/dev/dri/card0` is `tegra_udrm` — NVIDIA's GPU compute device with no KMS connectors. Xorg `xf86-video-modesetting` finds it but fails with "no screens found". **Wayland via EGL/GBM is the only display path.**
+
+- **Weston version**: meta-tegra forces `PREFERRED_VERSION_weston = "10.0%"` in `tegra-common.inc` → meta-tegra's 10.0.2 wins over poky's 13.
+- **Display wiring**: `meta-tegra/conf/layer.conf` remaps `libdrm → libdrm-nvdc → tegra-libraries`. Weston's DRM backend talks to NVIDIA NVDC automatically.
+- **Launcher**: `kiosk.service` runs `/etc/kiosk/kiosk-launcher`, which starts weston (`XDG_RUNTIME_DIR=/run/kiosk`, socket `wayland-kiosk`), waits for socket, then execs `/etc/kiosk/kiosk-app`.
+- **Placeholder app**: `weston-terminal --fullscreen`. `weston-terminal` is in the main `weston` package FILES.
+- **Swap the app**: replace `/etc/kiosk/kiosk-app` on-device or in the recipe — no rebuild needed.
+- **PACKAGE_ARCH**: `packagegroup-kiosk` must set `PACKAGE_ARCH = "${MACHINE_ARCH}"`. Allarch packagegroups can't depend on dynamically-renamed NVIDIA packages (e.g. `egl-gbm → libnvidia-egl-gbm`).
+- **GPU check**: `WAYLAND_DISPLAY=wayland-kiosk XDG_RUNTIME_DIR=/run/kiosk weston-info` or `glmark2-wayland` (deb available, push with `jtx push glmark2`).
+
+### efi-timeout — UEFI boot countdown
+
+`meta-seeed-jetson/recipes-bsp/efi-timeout/` — first-boot oneshot service. Writes `Timeout` EFI variable (UINT16=0) to QSPI via efivarfs, eliminating the L4TLauncher countdown. Stamps `/var/lib/efi-timeout-configured` so it only runs once. In `packagegroup-seeed-base` — all images get it. Push to live board: `jtx push efi-timeout`.
 
 ## Build & flash
 
@@ -322,10 +347,11 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
 
 - ~~CAN0 500kbps~~ — **confirmed** UP at 500000bps, ERROR-ACTIVE, 0 bus errors at idle (via `jtx can`).
 - ~~spidev exposed~~ — **confirmed** spidev0.0, spidev0.1, spidev2.0, spidev2.1 present.
+- ~~Kiosk image~~ — **built and flashed**, weston + weston-terminal working. glmark2 pushed for GPU validation.
+- efi-timeout deb built; **not yet pushed to live board** (device was in UEFI menu). Push: `jtx push efi-timeout`.
 - Full image rebuild to bake aptX/LDAC codec debs (libfreeaptx, libldac recipes present but not yet in a pushed image).
 - I2S DAC wiring for actual audio output — currently routes to null sink.
 - Replace `debug-tweaks` (passwordless root) with proper user account once dev workflow settled.
-- Kiosk image (`kas/kiosk.yml`) recipes written, **not yet built/flashed**. X11 + matchbox-wm + xinit + xterm placeholder. Build: `kas-container build kas/kiosk.yml`. Replace `/etc/kiosk/kiosk-app` for real app. Potential issue: Tegra X11 EGL — may need additional `tegra-libraries-xorg` or similar package from meta-tegra if Xorg can't initialize the NVIDIA EGL backend; investigate on first boot.
 - Plasma image (`kas/plasma.yml`) build not yet attempted. Expect KDE Plasma 6 Wayland via KWin; first time on Tegra so sharp edges likely.
 - LXQt variant kas/recipe pair when ready.
 - sstate mirror TODO.
