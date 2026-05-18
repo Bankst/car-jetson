@@ -76,6 +76,7 @@ RDEPENDS:${PN} = " \
     evtest \
     \
     banks-root-authorized-keys \
+    efi-timeout \
 "
 
 # Mask conflicting network managers in the rootfs.
