@@ -16,4 +16,8 @@ banks_kiosk_target() {
     # Boot to graphical.target instead of multi-user.target
     ln -sf /lib/systemd/system/graphical.target \
         ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/default.target
+
+    # Mask weston-init's service — kiosk.service owns the compositor
+    ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/weston.service
+    ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/weston.socket
 }
