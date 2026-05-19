@@ -1,0 +1,336 @@
+#!/usr/bin/env python3
+"""BT A2DP media controller TUI for kiosk display."""
+
+import curses
+import os
+import subprocess
+import re
+import threading
+import time
+
+_PW_ENV = {**os.environ, "PIPEWIRE_RUNTIME_DIR": "/run/pipewire"}
+
+
+class VolumeController:
+    def __init__(self):
+        self.volume = 0.0
+        self.muted = False
+
+    def poll(self):
+        try:
+            out = subprocess.run(
+                ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
+                capture_output=True, text=True, timeout=1,
+                env=_PW_ENV).stdout
+            m = re.search(r'Volume:\s+([\d.]+)', out)
+            if m:
+                self.volume = float(m.group(1))
+            self.muted = "[MUTED]" in out
+        except Exception:
+            pass
+
+    def set(self, delta):
+        try:
+            val = f"{abs(delta):.02f}{'+'if delta > 0 else '-'}"
+            subprocess.Popen(
+                ["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", val],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=_PW_ENV)
+        except Exception:
+            pass
+
+    def up(self):
+        self.set(0.05)
+        self.volume = min(1.0, self.volume + 0.05)
+
+    def down(self):
+        self.set(-0.05)
+        self.volume = max(0.0, self.volume - 0.05)
+
+    def toggle_mute(self):
+        try:
+            subprocess.Popen(
+                ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=_PW_ENV)
+            self.muted = not self.muted
+        except Exception:
+            pass
+
+
+class MediaController:
+    def __init__(self):
+        self.player_path = None
+        self.status = "stopped"
+        self.title = self.artist = self.album = ""
+        self.track_num = self.track_total = 0
+        self.duration = self.position = 0
+        self._pos_time = 0
+        self._lock = threading.Lock()
+        self._monitor = None
+        self._dirty = True
+
+    def find_player(self):
+        try:
+            out = subprocess.run(
+                ["dbus-send", "--system", "--dest=org.bluez", "--print-reply",
+                 "/", "org.freedesktop.DBus.ObjectManager.GetManagedObjects"],
+                capture_output=True, text=True, timeout=2
+            ).stdout
+            m = re.search(r'"(/org/bluez/hci\d+/dev_[A-F0-9_]+/player\d+)"', out)
+            with self._lock:
+                self.player_path = m.group(1) if m else None
+        except Exception:
+            with self._lock:
+                self.player_path = None
+        return self.player_path is not None
+
+    def _cmd(self, method):
+        if not self.player_path:
+            return
+        try:
+            subprocess.Popen(
+                ["dbus-send", "--system", "--dest=org.bluez", "--print-reply",
+                 self.player_path, f"org.bluez.MediaPlayer1.{method}"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    def play_pause(self):
+        self._cmd("Pause" if self.status == "playing" else "Play")
+
+    def next(self):
+        self._cmd("Next")
+
+    def previous(self):
+        self._cmd("Previous")
+
+    def poll(self):
+        if not self.player_path and not self.find_player():
+            with self._lock:
+                self.title = self.artist = self.album = ""
+                self.status = "stopped"
+            return
+        try:
+            out = subprocess.run(
+                ["dbus-send", "--system", "--dest=org.bluez", "--print-reply",
+                 self.player_path, "org.freedesktop.DBus.Properties.GetAll",
+                 "string:org.bluez.MediaPlayer1"],
+                capture_output=True, text=True, timeout=2)
+            if out.returncode != 0:
+                with self._lock:
+                    self.player_path = None
+                return
+            with self._lock:
+                self._parse(out.stdout)
+                self._pos_time = time.monotonic()
+        except Exception:
+            with self._lock:
+                self.player_path = None
+
+    def estimated_position(self):
+        with self._lock:
+            if self.status == "playing" and self._pos_time > 0:
+                elapsed_ms = (time.monotonic() - self._pos_time) * 1000
+                return min(self.position + int(elapsed_ms), self.duration)
+            return self.position
+
+    def start_monitor(self):
+        if self._monitor and self._monitor.is_alive():
+            return
+        self._monitor = threading.Thread(target=self._run_monitor, daemon=True)
+        self._monitor.start()
+
+    def _run_monitor(self):
+        try:
+            proc = subprocess.Popen(
+                ["dbus-monitor", "--system",
+                 "type='signal',interface='org.freedesktop.DBus.Properties',"
+                 "member='PropertiesChanged',arg0='org.bluez.MediaPlayer1'"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            for line in proc.stdout:
+                if "PropertiesChanged" in line or "variant" in line:
+                    self._dirty = True
+        except Exception:
+            pass
+
+    def check_dirty(self):
+        if self._dirty:
+            self._dirty = False
+            self.poll()
+            return True
+        return False
+
+    def _parse(self, raw):
+        def s(key):
+            m = re.search(rf'"{key}"\s+variant\s+string\s+"([^"]*)"', raw)
+            return m.group(1) if m else ""
+        def u(key):
+            m = re.search(rf'"{key}"\s+variant\s+uint32\s+(\d+)', raw)
+            return int(m.group(1)) if m else 0
+
+        self.status = s("Status") or "stopped"
+        self.position = u("Position")
+        self.title = s("Title")
+        self.artist = s("Artist")
+        self.album = s("Album")
+        self.track_num = u("TrackNumber")
+        self.track_total = u("NumberOfTracks")
+        self.duration = u("Duration")
+
+
+def fmt_time(ms):
+    s = ms // 1000
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def center(stdscr, y, text, attr=0):
+    _, w = stdscr.getmaxyx()
+    x = max(0, w // 2 - len(text) // 2)
+    try:
+        stdscr.addstr(y, x, text[:w-1], attr)
+    except curses.error:
+        pass
+
+
+def draw_button(stdscr, y, x, w, label, attr):
+    top = "+" + "-" * (w - 2) + "+"
+    mid = "|" + label.center(w - 2) + "|"
+    bot = "+" + "-" * (w - 2) + "+"
+    for dy, line in enumerate([top, mid, bot]):
+        try:
+            stdscr.addstr(y + dy, x, line, attr)
+        except curses.error:
+            pass
+
+
+def draw(stdscr, mc, vc, btn_regions):
+    h, w = stdscr.getmaxyx()
+    cx = w // 2
+    stdscr.erase()
+
+    if not mc.player_path:
+        center(stdscr, h // 2 - 1, "Waiting for Bluetooth...", curses.A_DIM)
+        center(stdscr, h // 2 + 1, "Pair a device to start streaming", curses.A_DIM)
+        stdscr.refresh()
+        return
+
+    y = max(1, h // 2 - 9)
+
+    center(stdscr, y, "NOW PLAYING", curses.A_BOLD | curses.A_DIM)
+    y += 2
+
+    if mc.title:
+        center(stdscr, y, mc.title, curses.A_BOLD)
+    y += 1
+    if mc.artist:
+        center(stdscr, y, mc.artist)
+    y += 1
+    if mc.album:
+        center(stdscr, y, mc.album, curses.A_DIM)
+    y += 2
+
+    if mc.track_total > 0:
+        center(stdscr, y, f"{mc.track_num} / {mc.track_total}", curses.A_DIM)
+    y += 2
+
+    bar_w = min(36, w - 20)
+    pos = mc.estimated_position()
+    if mc.duration > 0:
+        pct = min(1.0, pos / mc.duration)
+        filled = int(bar_w * pct)
+        bar = "█" * filled + "░" * (bar_w - filled)
+        ts = f"  {fmt_time(pos)} / {fmt_time(mc.duration)}"
+        center(stdscr, y, bar + ts)
+    y += 2
+
+    vol_w = min(20, w - 20)
+    vol_pct = min(1.0, vc.volume)
+    vol_filled = int(vol_w * vol_pct)
+    vol_bar = "█" * vol_filled + "░" * (vol_w - vol_filled)
+    vol_label = "MUTED" if vc.muted else f"{int(vol_pct * 100)}%"
+    vol_attr = curses.A_DIM if vc.muted else curses.A_NORMAL
+    center(stdscr, y, f"Vol: {vol_bar}  {vol_label}", vol_attr)
+    y += 3
+
+    btn_w = 8
+    gap = 2
+    total = btn_w * 5 + gap * 4
+    bx = max(0, cx - total // 2)
+
+    playing = mc.status == "playing"
+    buttons = [
+        ("VOL-", vc.down, curses.A_BOLD),
+        ("|<<", mc.previous, curses.A_BOLD),
+        ("||" if playing else ">", mc.play_pause, curses.A_BOLD | curses.A_REVERSE),
+        (">>|", mc.next, curses.A_BOLD),
+        ("VOL+", vc.up, curses.A_BOLD),
+    ]
+
+    btn_regions.clear()
+    for i, (label, action, attr) in enumerate(buttons):
+        x = bx + i * (btn_w + gap)
+        draw_button(stdscr, y, x, btn_w, label, attr)
+        btn_regions.append((y, x, y + 3, x + btn_w, action))
+
+    stdscr.refresh()
+
+
+def main(stdscr):
+    try:
+        curses.curs_set(0)
+    except curses.error:
+        pass
+    curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
+    stdscr.timeout(200)
+
+    mc = MediaController()
+    vc = VolumeController()
+    mc.poll()
+    vc.poll()
+    mc.start_monitor()
+    btn_regions = []
+    last_poll = 0
+
+    while True:
+        now = time.monotonic()
+        mc.check_dirty()
+        if now - last_poll > 5:
+            mc.poll()
+            vc.poll()
+            mc.start_monitor()
+            last_poll = now
+
+        draw(stdscr, mc, vc, btn_regions)
+
+        key = stdscr.getch()
+        if key == ord("q") or key == 27:
+            break
+        elif key == ord(" "):
+            mc.play_pause()
+        elif key == ord("n") or key == curses.KEY_RIGHT:
+            mc.next()
+        elif key == ord("p") or key == curses.KEY_LEFT:
+            mc.previous()
+        elif key == curses.KEY_UP or key == ord("+") or key == ord("="):
+            vc.up()
+        elif key == curses.KEY_DOWN or key == ord("-"):
+            vc.down()
+        elif key == ord("m"):
+            vc.toggle_mute()
+        elif key == curses.KEY_MOUSE:
+            try:
+                _, mx, my, _, bstate = curses.getmouse()
+                if bstate & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED):
+                    for y1, x1, y2, x2, action in btn_regions:
+                        if y1 <= my < y2 and x1 <= mx < x2:
+                            action()
+                            break
+            except curses.error:
+                pass
+        elif key == curses.KEY_RESIZE:
+            stdscr.clear()
+
+
+if __name__ == "__main__":
+    curses.wrapper(main)

@@ -13,13 +13,15 @@ SRC_URI = " \
     file://kiosk-keys.conf \
     file://weston-kiosk.ini \
     file://triggerhappy-override.conf \
+    file://banks-media-player \
+    file://kiosk-media-shell \
 "
 
 S = "${WORKDIR}"
 
 inherit systemd
 
-RDEPENDS:${PN} = "bash"
+RDEPENDS:${PN} = "bash python3-core python3-curses dbus"
 
 SYSTEMD_SERVICE:${PN} = "kiosk.service"
 SYSTEMD_AUTO_ENABLE = "enable"
@@ -29,7 +31,11 @@ do_install() {
     install -m 0755 ${WORKDIR}/kiosk-launcher ${D}${sysconfdir}/kiosk/kiosk-launcher
     install -m 0755 ${WORKDIR}/kiosk-app         ${D}${sysconfdir}/kiosk/kiosk-app
     install -m 0755 ${WORKDIR}/kiosk-login-shell ${D}${sysconfdir}/kiosk/kiosk-login-shell
+    install -m 0755 ${WORKDIR}/kiosk-media-shell ${D}${sysconfdir}/kiosk/kiosk-media-shell
     install -m 0644 ${WORKDIR}/weston-kiosk.ini     ${D}${sysconfdir}/kiosk/weston-kiosk.ini
+
+    install -d ${D}${bindir}
+    install -m 0755 ${WORKDIR}/banks-media-player ${D}${bindir}/banks-media-player
     install -m 0755 ${WORKDIR}/toggle-desktop-mode ${D}${sysconfdir}/kiosk/toggle-desktop-mode
 
     install -d ${D}${sysconfdir}/triggerhappy/triggers.d
@@ -50,4 +56,5 @@ FILES:${PN} = " \
     ${systemd_system_unitdir}/kiosk.service \
     ${systemd_system_unitdir}/triggerhappy.service.d/override.conf \
     /var/lib/kiosk \
+    ${bindir}/banks-media-player \
 "
