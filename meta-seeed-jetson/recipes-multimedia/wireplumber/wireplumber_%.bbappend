@@ -11,6 +11,7 @@ SRC_URI:append = " \
     file://wireplumber-headless.service.conf \
     file://wireplumber-state.conf \
     file://pipewire-headless.service.conf \
+    file://30-disable-reserve.conf \
 "
 
 do_install:append() {
@@ -20,6 +21,8 @@ do_install:append() {
         ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/10-headless-bt.conf
     install -m 0644 ${WORKDIR}/20-bt-a2dp-only.conf \
         ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/20-bt-a2dp-only.conf
+    install -m 0644 ${WORKDIR}/30-disable-reserve.conf \
+        ${D}${sysconfdir}/wireplumber/wireplumber.conf.d/30-disable-reserve.conf
 
     # PipeWire config: null sink fallback so BT streams always have a link target
     install -d ${D}${sysconfdir}/pipewire/pipewire.conf.d
@@ -44,6 +47,7 @@ do_install:append() {
 FILES:${PN}:append = " \
     ${sysconfdir}/wireplumber/wireplumber.conf.d/10-headless-bt.conf \
     ${sysconfdir}/wireplumber/wireplumber.conf.d/20-bt-a2dp-only.conf \
+    ${sysconfdir}/wireplumber/wireplumber.conf.d/30-disable-reserve.conf \
     ${sysconfdir}/pipewire/pipewire.conf.d/10-null-sink.conf \
     ${systemd_system_unitdir}/wireplumber.service.d/headless.conf \
     ${systemd_system_unitdir}/pipewire.service.d/headless.conf \
