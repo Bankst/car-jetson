@@ -1,0 +1,15 @@
+#!/bin/sh
+FLAG=/var/lib/kiosk/desktop-mode
+LOCK=/tmp/kiosk-toggle.lock
+
+(
+    flock -n 200 || exit 0
+
+    if [ -f "$FLAG" ]; then
+        rm -f "$FLAG"
+    else
+        touch "$FLAG"
+    fi
+    /bin/systemctl restart kiosk.service
+    sleep 1
+) 200>"$LOCK"

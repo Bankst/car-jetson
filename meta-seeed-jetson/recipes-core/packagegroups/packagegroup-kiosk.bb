@@ -19,4 +19,5 @@ RDEPENDS:${PN} = " \
     tegra-libraries-gbm-backend \
     \
     banks-kiosk \
+    triggerhappy \
 "

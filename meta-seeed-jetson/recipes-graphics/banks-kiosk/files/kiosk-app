@@ -1,4 +1,6 @@
 #!/bin/sh
 # Placeholder kiosk application (Wayland-native via weston-terminal).
 # Replace with real binary, e.g.: /usr/bin/my-qt-app or chromium-browser --kiosk
-exec /usr/bin/weston-terminal --fullscreen
+TERM_ARGS="--fullscreen"
+[ -f /var/lib/kiosk/desktop-mode ] && TERM_ARGS="--maximized"
+exec /usr/bin/weston-terminal $TERM_ARGS --shell=/etc/kiosk/kiosk-login-shell

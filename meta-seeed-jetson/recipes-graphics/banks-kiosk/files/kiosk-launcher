@@ -5,7 +5,10 @@ export XDG_RUNTIME_DIR=/run/kiosk
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 0700 "$XDG_RUNTIME_DIR"
 
-weston --socket=wayland-kiosk --tty=7 &
+SHELL_PLUGIN=kiosk-shell.so
+[ -f /var/lib/kiosk/desktop-mode ] && SHELL_PLUGIN=desktop-shell.so
+
+weston --config=/etc/kiosk/weston-kiosk.ini --shell="$SHELL_PLUGIN" --socket=wayland-kiosk --tty=7 &
 WPID=$!
 
 # Wait up to 10s for Wayland socket

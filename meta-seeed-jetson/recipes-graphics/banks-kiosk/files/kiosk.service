@@ -4,7 +4,7 @@ After=systemd-udevd.service
 
 [Service]
 ExecStart=/etc/kiosk/kiosk-launcher
-Restart=on-failure
+Restart=always
 RestartSec=3
 StandardOutput=journal
 StandardError=journal
