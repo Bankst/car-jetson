@@ -1,8 +1,8 @@
 [Unit]
 Description=Initialize persistent data partition (UDA)
-DefaultDependencies=no
-Before=local-fs.target banks-persist.mount
-After=dev-disk-by\x2dpartlabel-UDA.device
+After=dev-disk-by\x2dpartlabel-UDA.device local-fs-pre.target
+Wants=dev-disk-by\x2dpartlabel-UDA.device
+Before=local-fs.target
 
 [Service]
 Type=oneshot
