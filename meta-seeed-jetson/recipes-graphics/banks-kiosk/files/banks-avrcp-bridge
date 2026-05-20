@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Bridge AVRCP commands from BT headsets to the connected phone's media player."""
+
+import os
+import struct
+import subprocess
+import glob
+import threading
+import time
+
+INPUT_EVENT_FMT = 'llHHI'
+INPUT_EVENT_SIZE = struct.calcsize(INPUT_EVENT_FMT)
+EV_KEY = 1
+
+KEY_MAP = {
+    200: "Play",       # KEY_PLAYCD
+    201: "Pause",      # KEY_PAUSECD
+    164: "Pause",      # KEY_PLAYPAUSE
+    163: "Next",       # KEY_NEXTSONG
+    165: "Previous",   # KEY_PREVIOUSSONG
+}
+
+VOL_KEYS = {
+    115: 0.05,         # KEY_VOLUMEUP
+    114: -0.05,        # KEY_VOLUMEDOWN
+}
+
+
+def find_phone_player():
+    try:
+        out = subprocess.run(
+            ["dbus-send", "--system", "--dest=org.bluez", "--print-reply",
+             "/", "org.freedesktop.DBus.ObjectManager.GetManagedObjects"],
+            capture_output=True, text=True, timeout=2).stdout
+        import re
+        for m in re.finditer(r'"(/org/bluez/hci\d+/dev_[A-F0-9_]+/player\d+)"', out):
+            return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
+def send_command(player_path, cmd):
+    try:
+        subprocess.Popen(
+            ["dbus-send", "--system", "--dest=org.bluez", "--print-reply",
+             player_path, f"org.bluez.MediaPlayer1.{cmd}"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+def set_volume(delta):
+    try:
+        val = f"{abs(delta):.02f}{'+'if delta > 0 else '-'}"
+        subprocess.Popen(
+            ["wpctl", "set-volume", "-l", "1.0", "@DEFAULT_AUDIO_SINK@", val],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env={**os.environ, "PIPEWIRE_RUNTIME_DIR": "/run/pipewire"})
+    except Exception:
+        pass
+
+
+def device_has_bt_volume(name):
+    """Check if this AVRCP device has BT transport volume (AbsoluteVolume)."""
+    try:
+        mac = None
+        for part in name.split():
+            if part == "(AVRCP)":
+                break
+            mac = part
+        if not mac:
+            return False
+        mac_dbus = mac.replace(":", "_")
+        out = subprocess.run(
+            ["dbus-send", "--system", "--dest=org.bluez", "--print-reply",
+             f"/org/bluez/hci0/dev_{mac_dbus}",
+             "org.freedesktop.DBus.Properties.Get",
+             "string:org.bluez.MediaTransport1", "string:Volume"],
+            capture_output=True, text=True, timeout=2)
+        return out.returncode == 0
+    except Exception:
+        return False
+
+
+def find_avrcp_devices():
+    devices = []
+    for devpath in sorted(glob.glob("/dev/input/event*")):
+        try:
+            num = devpath.split("event")[1]
+            name_path = f"/sys/class/input/event{num}/device/name"
+            with open(name_path) as f:
+                name = f.read().strip()
+            if "(AVRCP)" in name:
+                has_vol = device_has_bt_volume(name)
+                devices.append((devpath, name, has_vol))
+        except Exception:
+            continue
+    return devices
+
+
+def watch_device(devpath, name, has_bt_volume):
+    while True:
+        try:
+            with open(devpath, "rb") as f:
+                while True:
+                    data = f.read(INPUT_EVENT_SIZE)
+                    if len(data) < INPUT_EVENT_SIZE:
+                        break
+                    _, _, ev_type, code, value = struct.unpack(INPUT_EVENT_FMT, data)
+                    if ev_type != EV_KEY or value != 1:
+                        continue
+
+                    if code in KEY_MAP:
+                        player = find_phone_player()
+                        if player:
+                            send_command(player, KEY_MAP[code])
+                    elif code in VOL_KEYS and not has_bt_volume:
+                        set_volume(VOL_KEYS[code])
+        except Exception:
+            time.sleep(2)
+
+
+def main():
+    seen = set()
+    while True:
+        for devpath, name, has_bt_volume in find_avrcp_devices():
+            if devpath not in seen:
+                seen.add(devpath)
+                t = threading.Thread(target=watch_device, args=(devpath, name, has_bt_volume), daemon=True)
+                t.start()
+        time.sleep(5)
+
+
+if __name__ == "__main__":
+    main()

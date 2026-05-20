@@ -11,6 +11,66 @@ import time
 _PW_ENV = {**os.environ, "PIPEWIRE_RUNTIME_DIR": "/run/pipewire"}
 
 
+class BTSinkMonitor:
+    """Track per-BT-output-sink volume from BlueZ transport properties."""
+    def __init__(self):
+        self.sinks = {}
+        self._lock = threading.Lock()
+
+    def poll(self):
+        try:
+            out = subprocess.run(
+                ["dbus-send", "--system", "--dest=org.bluez", "--print-reply",
+                 "/", "org.freedesktop.DBus.ObjectManager.GetManagedObjects"],
+                capture_output=True, text=True, timeout=2).stdout
+            # Find transport paths and device aliases
+            transport_paths = re.findall(
+                r'object path "(/org/bluez/hci\d+/dev_[A-F0-9_]+(?:/sep\d+)?/fd\d+)"', out)
+            sinks = {}
+            for tp in transport_paths:
+                try:
+                    tout = subprocess.run(
+                        ["dbus-send", "--system", "--dest=org.bluez", "--print-reply",
+                         tp, "org.freedesktop.DBus.Properties.GetAll",
+                         "string:org.bluez.MediaTransport1"],
+                        capture_output=True, text=True, timeout=1).stdout
+                    uuid_m = re.search(r'"UUID"\s+variant\s+string\s+"([^"]*)"', tout)
+                    if not uuid_m:
+                        continue
+                    uuid = uuid_m.group(1)
+                    # 110a = Audio Source (we send to), 110b = Audio Sink (we receive from)
+                    if uuid not in ("0000110a-0000-1000-8000-00805f9b34fb",
+                                    "0000110b-0000-1000-8000-00805f9b34fb"):
+                        continue
+                    is_source = uuid == "0000110b-0000-1000-8000-00805f9b34fb"
+                    mac_m = re.search(r'dev_([A-F0-9_]+)', tp)
+                    if not mac_m:
+                        continue
+                    mac_under = mac_m.group(1)
+                    vol_m = re.search(r'"Volume"\s+variant\s+uint16\s+(\d+)', tout)
+                    volume = int(vol_m.group(1)) if vol_m else -1
+                    dev_path = re.search(r'(/org/bluez/hci\d+/dev_[A-F0-9_]+)', tp).group(1)
+                    aout = subprocess.run(
+                        ["dbus-send", "--system", "--dest=org.bluez", "--print-reply",
+                         dev_path, "org.freedesktop.DBus.Properties.Get",
+                         "string:org.bluez.Device1", "string:Alias"],
+                        capture_output=True, text=True, timeout=1).stdout
+                    alias_m = re.search(r'string "([^"]*)"', aout)
+                    name = alias_m.group(1) if alias_m else mac_under.replace("_", ":")
+                    tag = "src" if is_source else "out"
+                    sinks[f"{mac_under}_{tag}"] = {"name": name, "volume": volume, "is_source": is_source}
+                except Exception:
+                    continue
+            with self._lock:
+                self.sinks = sinks
+        except Exception:
+            pass
+
+    def get_sinks(self):
+        with self._lock:
+            return dict(self.sinks)
+
+
 class VolumeController:
     def __init__(self):
         self.volume = 0.0
@@ -69,6 +129,7 @@ class MediaController:
         self._lock = threading.Lock()
         self._monitor = None
         self._dirty = True
+        self._bt_vol_dirty = False
 
     def find_player(self):
         try:
@@ -146,11 +207,13 @@ class MediaController:
             proc = subprocess.Popen(
                 ["dbus-monitor", "--system",
                  "type='signal',interface='org.freedesktop.DBus.Properties',"
-                 "member='PropertiesChanged',arg0='org.bluez.MediaPlayer1'"],
+                 "member='PropertiesChanged'"],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
             for line in proc.stdout:
-                if "PropertiesChanged" in line or "variant" in line:
+                if "MediaPlayer1" in line:
                     self._dirty = True
+                if "MediaTransport1" in line:
+                    self._bt_vol_dirty = True
         except Exception:
             pass
 
@@ -158,6 +221,12 @@ class MediaController:
         if self._dirty:
             self._dirty = False
             self.poll()
+            return True
+        return False
+
+    def check_bt_vol_dirty(self):
+        if self._bt_vol_dirty:
+            self._bt_vol_dirty = False
             return True
         return False
 
@@ -204,7 +273,7 @@ def draw_button(stdscr, y, x, w, label, attr):
             pass
 
 
-def draw(stdscr, mc, vc, btn_regions):
+def draw(stdscr, mc, vc, bt_mon, btn_regions):
     h, w = stdscr.getmaxyx()
     cx = w // 2
     stdscr.erase()
@@ -215,7 +284,9 @@ def draw(stdscr, mc, vc, btn_regions):
         stdscr.refresh()
         return
 
-    y = max(1, h // 2 - 9)
+    bt_sinks = bt_mon.get_sinks()
+    sink_count = len(bt_sinks)
+    y = max(1, h // 2 - 9 - sink_count)
 
     center(stdscr, y, "NOW PLAYING", curses.A_BOLD | curses.A_DIM)
     y += 2
@@ -250,8 +321,22 @@ def draw(stdscr, mc, vc, btn_regions):
     vol_bar = "█" * vol_filled + "░" * (vol_w - vol_filled)
     vol_label = "MUTED" if vc.muted else f"{int(vol_pct * 100)}%"
     vol_attr = curses.A_DIM if vc.muted else curses.A_NORMAL
-    center(stdscr, y, f"Vol: {vol_bar}  {vol_label}", vol_attr)
-    y += 3
+    center(stdscr, y, f"Out: {vol_bar}  {vol_label}", vol_attr)
+    y += 1
+
+    for key, info in sorted(bt_sinks.items(), key=lambda x: (x[1]["is_source"], x[1]["name"])):
+        vol = info["volume"]
+        name = info["name"]
+        direction = "IN" if info["is_source"] else "BT"
+        if vol < 0:
+            center(stdscr, y, f" {direction} {name}: --", curses.A_DIM)
+        else:
+            bt_pct = vol / 127.0
+            bt_filled = int(vol_w * bt_pct)
+            bt_bar = "█" * bt_filled + "░" * (vol_w - bt_filled)
+            center(stdscr, y, f" {direction} {name}: {bt_bar}  {int(bt_pct * 100)}%", curses.A_DIM)
+        y += 1
+    y += 2
 
     btn_w = 8
     gap = 2
@@ -286,8 +371,10 @@ def main(stdscr):
 
     mc = MediaController()
     vc = VolumeController()
+    bt_mon = BTSinkMonitor()
     mc.poll()
     vc.poll()
+    bt_mon.poll()
     mc.start_monitor()
     btn_regions = []
     last_poll = 0
@@ -295,13 +382,16 @@ def main(stdscr):
     while True:
         now = time.monotonic()
         mc.check_dirty()
+        if mc.check_bt_vol_dirty():
+            bt_mon.poll()
         if now - last_poll > 5:
             mc.poll()
             vc.poll()
+            bt_mon.poll()
             mc.start_monitor()
             last_poll = now
 
-        draw(stdscr, mc, vc, btn_regions)
+        draw(stdscr, mc, vc, bt_mon, btn_regions)
 
         key = stdscr.getch()
         if key == ord("q") or key == 27:
