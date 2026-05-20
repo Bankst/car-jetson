@@ -1,16 +1,12 @@
 From: Banks Troutman <banks.troutman@oxos.com>
-Subject: flash: remove sudo, add permissions preflight with auto-install
+Subject: make-sdcard: remove sudo fallback for unprivileged flash
 
-make-sdcard: remove sudo fallback — fail with EPERM if user lacks
-block device access (disk group).
-
-initrd-flash: add preflight check for udev rule (Tegra recovery USB)
-and polkit rule (udisksctl mount). If missing, prompt once for
-elevation to install them, then continue unprivileged.
+Run as the invoking user — fail with EPERM instead of silently
+escalating. User must have disk group access to the block device.
 
 --- a/make-sdcard.sh
 +++ b/make-sdcard.sh
-@@ -12,8 +12,6 @@ OUTSYSBLK=
+@@ -12,8 +12,6 @@
  HAVEBMAPTOOL=
 
  SUDO=
@@ -19,83 +15,3 @@ elevation to install them, then continue unprivileged.
  usage() {
      cat <<EOF
 
---- a/initrd-flash.sh
-+++ b/initrd-flash.sh
-@@ -6,6 +6,58 @@ here=$(readlink -f $(dirname "$0"))
-
- declare -A DEFAULTS
-
-+preflight_permissions() {
-+    local need_elevate=0
-+    local udev_rule="/etc/udev/rules.d/99-tegra-flash.rules"
-+    local polkit_rule="/etc/polkit-1/rules.d/50-udisks-noauth.rules"
-+
-+    # Check disk group membership
-+    if ! id -nG | grep -qw disk; then
-+        echo "ERR: user $(whoami) not in 'disk' group — cannot write to block devices" >&2
-+        echo "     Fix: sudo usermod -aG disk $(whoami) && newgrp disk" >&2
-+        exit 1
-+    fi
-+
-+    # Check udev rule for Tegra recovery USB
-+    if [ ! -f "$udev_rule" ]; then
-+        echo "Missing udev rule for Tegra recovery USB: $udev_rule"
-+        need_elevate=1
-+    fi
-+
-+    # Check polkit rule for udisksctl mount
-+    # (rules.d is root:polkitd 750 — test with pkcheck instead)
-+    if ! pkcheck --action-id org.freedesktop.udisks2.filesystem-mount \
-+         --process $$ --allow-user-interaction >/dev/null 2>&1; then
-+        echo "Missing polkit rule for udisksctl mount: $polkit_rule"
-+        need_elevate=1
-+    fi
-+
-+    if [ $need_elevate -eq 0 ]; then
-+        return 0
-+    fi
-+
-+    echo ""
-+    echo "Installing missing permission rules (one-time setup, requires elevation)..."
-+    echo ""
-+
-+    if [ ! -f "$udev_rule" ]; then
-+        sudo tee "$udev_rule" > /dev/null << 'UDEV'
-+# NVIDIA Tegra recovery mode — allow disk group access
-+SUBSYSTEM=="usb", ATTR{idVendor}=="0955", ATTR{idProduct}=="7e19", GROUP="disk", MODE="0660"
-+UDEV
-+        sudo udevadm control --reload-rules
-+        echo "Installed: $udev_rule"
-+    fi
-+
-+    if ! pkcheck --action-id org.freedesktop.udisks2.filesystem-mount \
-+         --process $$ --allow-user-interaction >/dev/null 2>&1; then
-+        sudo tee "$polkit_rule" > /dev/null << 'POLKIT'
-+polkit.addRule(function(action, subject) {
-+    if ((action.id == "org.freedesktop.udisks2.filesystem-mount" ||
-+         action.id == "org.freedesktop.udisks2.filesystem-mount-other-seat" ||
-+         action.id == "org.freedesktop.udisks2.filesystem-unmount-others") &&
-+        subject.isInGroup("wheel")) {
-+        return polkit.Result.YES;
-+    }
-+});
-+POLKIT
-+        echo "Installed: $polkit_rule"
-+    fi
-+
-+    echo ""
-+}
-+
- usage() {
-     cat <<EOF
- Usage:
-@@ -34,6 +86,9 @@ if [ ! -e .env.initrd-flash ]; then
-
- . .env.initrd-flash
-
-+# Preflight: check/install permissions before anything else
-+[ $(id -u) -eq 0 ] || preflight_permissions
-+
- # The .presigning-vars file is generated when binaries
- # are signed during the build
- PRESIGNED=

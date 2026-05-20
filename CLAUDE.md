@@ -75,6 +75,7 @@ meta-seeed-jetson/
     linux-tegra/usb-modem.cfg             # CDC_NCM, USB_SERIAL_OPTION, USB_WDM (cellular USB modems, off by default)
     linux-tegra/usb-gadget.cfg            # USB_GADGET, CONFIGFS_*, NCM/ACM/RNDIS/ECM
   recipes-core/
+    banks-persist/                        # UDA partition persistence: format, mount /data, bind-mount BT keys + SSH keys
     images/banks-jetson-image-{base,kiosk,plasma,lxqt}.bb
     packagegroups/{packagegroup-seeed-base, packagegroup-kiosk, packagegroup-de-plasma-minimal}.bb
 
@@ -362,7 +363,9 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
 
 15. **`initrd-flash` prompts for password mid-flash.** `initrd-flash` uses `udisksctl mount` to access USB storage during the "create partitions" step. Polkit requires auth for `org.freedesktop.udisks2.filesystem-mount` without an active desktop session. Fix: `scripts/setup-host-flash-permissions.sh` installs a polkit rule allowing `wheel` group to mount without password. Run once on the build host.
 
-16. **weston-terminal 10 has no mouse/touch reporting.** Curses `mousemask()` works but weston-terminal never sends mouse escape sequences to the pty. `foot` terminal supports mouse but has no OE recipe in any available layer. For touch-enabled kiosk apps, either write a `foot` recipe or use a native Wayland toolkit.
+16. **weston-terminal 10 has no mouse/touch reporting.** Curses `mousemask()` works but weston-terminal never sends mouse escape sequences to the pty. Fix: use `matchbox-terminal` (GTK3 + VTE, Wayland-native) which has proper mouse reporting. `foot` terminal not in any OE layer.
+
+17. **Persistent data across reflash — UDA partition.** NVMe partition 15 (`PARTLABEL=UDA`, 400MB) is part of NVIDIA's standard flash layout and is unused by default. `banks-persist` recipe formats it as ext4 on first boot, mounts at `/data`, and bind-mounts `/var/lib/bluetooth` + `/etc/ssh` from it. BT pairing keys and SSH host keys survive rootfs reflash (when flashing without `--erase-nvme`). First flash with `--erase-nvme` creates UDA empty; first boot initializes it; subsequent flashes without `--erase-nvme` preserve it. Recipe in `recipes-core/banks-persist/`, added to `packagegroup-seeed-base` so all images get it.
 
 ## Open follow-ups
 
@@ -373,7 +376,7 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
 - ~~WirePlumber ALSA~~ — **fixed**. USB audio devices now enumerated by PipeWire. Root cause: D-Bus ReserveDevice1 crash on headless.
 - efi-timeout deb built; **not yet pushed to live board** (device was in UEFI menu). Push: `jtx push efi-timeout`.
 - Full image rebuild to bake aptX/LDAC codec debs (libfreeaptx, libldac recipes present but not yet in a pushed image).
-- Touch support for media player TUI — weston-terminal 10 lacks mouse reporting. `foot` terminal not in any OE layer. Options: write a `foot` recipe, or rewrite media player as native Wayland app (GTK/Qt).
+- ~~Touch support~~ — **fixed** with matchbox-terminal (GTK3/VTE). Mouse/touch working in media player TUI.
 - I2S DAC wiring for actual audio output — currently routes to USB headset or null sink.
 - Replace `debug-tweaks` (passwordless root) with proper user account once dev workflow settled.
 - Plasma image (`kas/plasma.yml`) build not yet attempted. Expect KDE Plasma 6 Wayland via KWin; first time on Tegra so sharp edges likely.
