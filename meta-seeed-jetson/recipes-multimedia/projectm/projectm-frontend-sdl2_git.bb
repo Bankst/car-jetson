@@ -31,4 +31,8 @@ do_configure:prepend() {
     # ImGui.cmake's ImGuiDemo target links OpenGL::GL which doesn't exist
     # without GLX. It's EXCLUDE_FROM_ALL so just neuter the reference.
     sed -i 's/OpenGL::GL/OpenGL::OpenGL/' ${S}/ImGui.cmake
+
+    # ImGui GL3 init hardcodes #version 150 (desktop GL). Fix for GLES 3.
+    sed -i 's|ImGui_ImplOpenGL3_Init("#version 150")|ImGui_ImplOpenGL3_Init("#version 300 es")|' \
+        ${S}/src/gui/ProjectMGUI.cpp
 }
