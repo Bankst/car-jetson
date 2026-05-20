@@ -34,6 +34,9 @@ Built and flash-tested. Boot from eMMC, rootfs on external NVMe (M.2 Key M 2242)
 ## Repo / layer structure
 
 ```
+scripts/
+  setup-host-flash-permissions.sh   # polkit rule for unattended initrd-flash (udisksctl mount)
+
 kas/
   base.yml          # poky + meta-oe + meta-tegra + machine; DE-agnostic
   kiosk.yml         # includes base.yml; adds Xorg + matchbox-wm + kiosk session; selects kiosk image
@@ -60,7 +63,11 @@ meta-seeed-jetson/
       can0.nmconnection                   # CAN0 at 500kbps
       seeed-a203-modules.conf             # /etc/modules-load.d/ — mttcan, can*, spidev
   recipes-graphics/
-    banks-kiosk/                          # kiosk session: kiosk.service + xinitrc + kiosk-app placeholder (xterm -fullscreen)
+    banks-kiosk/                          # kiosk session: weston + media player TUI + shell toggle (triggerhappy)
+      files/banks-media-player            # BT AVRCP media controller (Python curses TUI)
+      files/kiosk-launcher                # weston startup with kiosk/desktop shell toggle
+      files/toggle-desktop-mode           # Ctrl+Shift+D handler (flock debounce)
+      files/weston-kiosk.ini              # idle-time=0, require-input=false
   recipes-kernel/linux/
     linux-tegra_%.bbappend                # injects 4 config fragments + DTB substitution at do_deploy
     linux-tegra/can.cfg                   # CAN_*, MTTCAN
@@ -92,9 +99,13 @@ L4T R35 (JP5) dropped the X11 DDX driver. `/dev/dri/card0` is `tegra_udrm` — N
 
 - **Weston version**: meta-tegra forces `PREFERRED_VERSION_weston = "10.0%"` in `tegra-common.inc` → meta-tegra's 10.0.2 wins over poky's 13.
 - **Display wiring**: `meta-tegra/conf/layer.conf` remaps `libdrm → libdrm-nvdc → tegra-libraries`. Weston's DRM backend talks to NVIDIA NVDC automatically.
-- **Launcher**: `kiosk.service` runs `/etc/kiosk/kiosk-launcher`, which starts weston (`XDG_RUNTIME_DIR=/run/kiosk`, socket `wayland-kiosk`), waits for socket, then execs `/etc/kiosk/kiosk-app`.
-- **Placeholder app**: `weston-terminal --fullscreen`. `weston-terminal` is in the main `weston` package FILES.
-- **Swap the app**: replace `/etc/kiosk/kiosk-app` on-device or in the recipe — no rebuild needed.
+- **Launcher**: `kiosk.service` (`Restart=always`) runs `/etc/kiosk/kiosk-launcher`, which starts weston (`XDG_RUNTIME_DIR=/run/kiosk`, socket `wayland-kiosk`), waits for socket, then execs `/etc/kiosk/kiosk-app`.
+- **Shell toggle**: `kiosk-launcher` checks `/var/lib/kiosk/desktop-mode` flag: absent = `kiosk-shell.so` (no panel, fullscreen), present = `desktop-shell.so` (top bar, `Super+Tab` for window switching). Toggled via `Ctrl+Shift+D` (triggerhappy daemon, `kiosk-keys.conf`). Toggle script uses flock debounce (NanoKVM sends duplicate key events from two kbd devices).
+- **Default kiosk app**: `banks-media-player` — Python curses TUI showing BT AVRCP metadata (title/artist/album/progress) with play/pause/next/prev/volume controls. Keys: `space` play/pause, `n`/right next, `p`/left prev, `up`/`+` vol up, `down`/`-` vol down, `m` mute. Uses `dbus-monitor` thread for near-instant track updates + `dbus-send` for commands + `wpctl` for volume.
+- **Desktop mode app**: `weston-terminal --maximized` with bash login shell (sources `/etc/profile`).
+- **Idle/lock disabled**: `weston-kiosk.ini` sets `idle-time=0`. Without this, weston's screen locker activates after 5 min.
+- **weston-init masked**: kiosk image masks `weston.service` + `weston.socket` from `weston-init` recipe to prevent compositor conflict on tty7.
+- **Mouse/touch**: weston-terminal 10 does NOT support mouse reporting (no DECSET 1000/1006). Touch-enabled TUI would need `foot` terminal (not in any available OE layer) or a native Wayland app.
 - **PACKAGE_ARCH**: `packagegroup-kiosk` must set `PACKAGE_ARCH = "${MACHINE_ARCH}"`. Allarch packagegroups can't depend on dynamically-renamed NVIDIA packages (e.g. `egl-gbm → libnvidia-egl-gbm`).
 - **GPU check**: `WAYLAND_DISPLAY=wayland-kiosk XDG_RUNTIME_DIR=/run/kiosk weston-info` or `glmark2-wayland` (deb available, push with `jtx push glmark2`).
 
@@ -114,6 +125,9 @@ sudo dnf install -y dtc vim-common gdisk bmap-tools cpp lz4
 sudo usermod -aG docker "$USER"
 # Either log out/back in fully (Plasma session inherits groups at login),
 # OR wrap each command in: sg docker -c '...'
+
+# Unattended flash: allow udisksctl mount without password (initrd-flash uses udisksctl)
+./scripts/setup-host-flash-permissions.sh
 ```
 
 ### Build
@@ -237,7 +251,7 @@ Full BT audio sink stack baked into meta-seeed-jetson (commit 9beb609).
 - `recipes-multimedia/wireplumber/wireplumber_%.bbappend` — all headless fixes (see below)
 
 ### WirePlumber headless fixes
-WirePlumber is designed for user sessions (logind seat). On headless system service, three things break:
+WirePlumber is designed for user sessions (logind seat). On headless system service, four things break:
 
 1. `DBUS_SESSION_BUS_ADDRESS` unset → `dbus-connection` module fails to load → cascading skips
    - Fix: service drop-in `Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/dbus/system_bus_socket`
@@ -245,6 +259,9 @@ WirePlumber is designed for user sessions (logind seat). On headless system serv
    - Fix: `10-headless-bt.conf`: `monitor.bluez.seat-monitoring = disabled`
 3. pipewire user (home=`/`) can't create `/.local/state/wireplumber`
    - Fix: `tmpfiles.d/wireplumber-state.conf` creates `/.local/state/wireplumber` owned by pipewire
+4. D-Bus `ReserveDevice1` crashes WirePlumber → **no ALSA devices enumerated at all**. The reserve-device module tries to call `RequestRelease` on `org.freedesktop.ReserveDevice1.AudioN` which has no owner on the system bus → crash → restart loop. ALSA monitor activates, udev enumerates cards, but WirePlumber dies before creating PipeWire nodes.
+   - Fix: `30-disable-reserve.conf`: `monitor.alsa.reserve-device = disabled`
+   - Also: null sink must use `adapter` factory, not `spa-node-factory` — the latter doesn't advertise formats WirePlumber can negotiate, causing `no usable format found` errors.
 
 ### HFP cycling fix
 Workstation Handsfree profile triggers HFP connection → WirePlumber creates `bluez_input.<mac>.N` → can't find ALSA sink → 5s timeout → destroy → repeat = rescan storm.
@@ -343,14 +360,21 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
     - Baked in: `meta-seeed-jetson/recipes-connectivity/openssh/openssh_%.bbappend` ships custom `sshd_config` + `sshd.service`; image recipe masks `sshd.socket` and enables `sshd.service`.
     - **Strace artifacts**: measuring with `strace -e trace=all` caused `close_range()` to fail under ptrace → sshd fell back to 65535-iteration `close()` loop, making strace look like the bottleneck. Always filter strace traces (`-e trace=close,close_range` etc.) when measuring timing.
 
+15. **`initrd-flash` prompts for password mid-flash.** `initrd-flash` uses `udisksctl mount` to access USB storage during the "create partitions" step. Polkit requires auth for `org.freedesktop.udisks2.filesystem-mount` without an active desktop session. Fix: `scripts/setup-host-flash-permissions.sh` installs a polkit rule allowing `wheel` group to mount without password. Run once on the build host.
+
+16. **weston-terminal 10 has no mouse/touch reporting.** Curses `mousemask()` works but weston-terminal never sends mouse escape sequences to the pty. `foot` terminal supports mouse but has no OE recipe in any available layer. For touch-enabled kiosk apps, either write a `foot` recipe or use a native Wayland toolkit.
+
 ## Open follow-ups
 
 - ~~CAN0 500kbps~~ — **confirmed** UP at 500000bps, ERROR-ACTIVE, 0 bus errors at idle (via `jtx can`).
 - ~~spidev exposed~~ — **confirmed** spidev0.0, spidev0.1, spidev2.0, spidev2.1 present.
-- ~~Kiosk image~~ — **built and flashed**, weston + weston-terminal working. glmark2 pushed for GPU validation.
+- ~~Kiosk image~~ — **built and flashed**, weston + kiosk-shell + media player TUI working. BT A2DP streaming phone→Jetson→USB headset verified.
+- ~~BT A2DP sink~~ — **working end-to-end**. Phone pairs, streams A2DP, PipeWire routes to USB headset (Sennheiser), AVRCP metadata + playback control via media player TUI.
+- ~~WirePlumber ALSA~~ — **fixed**. USB audio devices now enumerated by PipeWire. Root cause: D-Bus ReserveDevice1 crash on headless.
 - efi-timeout deb built; **not yet pushed to live board** (device was in UEFI menu). Push: `jtx push efi-timeout`.
 - Full image rebuild to bake aptX/LDAC codec debs (libfreeaptx, libldac recipes present but not yet in a pushed image).
-- I2S DAC wiring for actual audio output — currently routes to null sink.
+- Touch support for media player TUI — weston-terminal 10 lacks mouse reporting. `foot` terminal not in any OE layer. Options: write a `foot` recipe, or rewrite media player as native Wayland app (GTK/Qt).
+- I2S DAC wiring for actual audio output — currently routes to USB headset or null sink.
 - Replace `debug-tweaks` (passwordless root) with proper user account once dev workflow settled.
 - Plasma image (`kas/plasma.yml`) build not yet attempted. Expect KDE Plasma 6 Wayland via KWin; first time on Tegra so sharp edges likely.
 - LXQt variant kas/recipe pair when ready.
