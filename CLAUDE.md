@@ -365,7 +365,10 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
 
 16. **weston-terminal 10 has no mouse/touch reporting.** Curses `mousemask()` works but weston-terminal never sends mouse escape sequences to the pty. Fix: use `matchbox-terminal` (GTK3 + VTE, Wayland-native) which has proper mouse reporting. `foot` terminal not in any OE layer.
 
-17. **Persistent data across reflash — UDA partition.** NVMe partition 15 (`PARTLABEL=UDA`, 400MB) is part of NVIDIA's standard flash layout and is unused by default. `banks-persist` recipe formats it as ext4 on first boot, mounts at `/data`, and bind-mounts `/var/lib/bluetooth` + `/etc/ssh` from it. BT pairing keys and SSH host keys survive rootfs reflash (when flashing without `--erase-nvme`). First flash with `--erase-nvme` creates UDA empty; first boot initializes it; subsequent flashes without `--erase-nvme` preserve it. Recipe in `recipes-core/banks-persist/`, added to `packagegroup-seeed-base` so all images get it.
+17. **Persistent data across reflash — UDA partition.** NVMe partition 15 (`PARTLABEL=UDA`, 400MB) is part of NVIDIA's standard flash layout and is unused by default. `banks-persist` recipe formats it as ext4 on first boot, mounts at `/data`, and bind-mounts `/var/lib/bluetooth` + SSH host keys from it. BT pairing keys and SSH host keys survive rootfs reflash (when flashing without `--erase-nvme`). First flash with `--erase-nvme` creates UDA empty; first boot initializes it; subsequent flashes without `--erase-nvme` preserve it. Recipe in `recipes-core/banks-persist/`, added to `packagegroup-seeed-base` so all images get it.
+    - **UDA mount**: fstab entry with `nofail,x-systemd.device-timeout=30` — added by `banks-persist-setup` on first boot. Setup service uses `Wants=dev-disk-by\x2dpartlabel-UDA.device` to wait for NVMe enumeration.
+    - **SSH persistence**: bind-mount individual `ssh_host_*` key files, NOT the entire `/etc/ssh/`. Binding the whole dir overwrites rootfs `sshd_config` with stale UDA copy, reverting UsePAM/KEX optimizations.
+    - **Triggerhappy socket activation**: must be masked in kiosk image. Socket-activated `thd` ignores `--deviceglob` and waits for `th-cmd --passfd` from udev — keyboard hotkeys silently stop working.
 
 ## Open follow-ups
 
@@ -377,6 +380,8 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
 - efi-timeout deb built; **not yet pushed to live board** (device was in UEFI menu). Push: `jtx push efi-timeout`.
 - Full image rebuild to bake aptX/LDAC codec debs (libfreeaptx, libldac recipes present but not yet in a pushed image).
 - ~~Touch support~~ — **fixed** with matchbox-terminal (GTK3/VTE). Mouse/touch working in media player TUI.
+- projectM audio visualizer — recipes built (libprojectm + frontend-sdl2), GLES shader fixed, SDL2 PipeWire backend enabled. Presets need to be bundled into the image (currently pushed manually). ImGui overlay needs testing after GLES shader fix.
+- Transparent terminal overlay for BT track info on top of projectM — matchbox-terminal supports VTE RGBA alpha, needs small patch.
 - I2S DAC wiring for actual audio output — currently routes to USB headset or null sink.
 - Replace `debug-tweaks` (passwordless root) with proper user account once dev workflow settled.
 - Plasma image (`kas/plasma.yml`) build not yet attempted. Expect KDE Plasma 6 Wayland via KWin; first time on Tegra so sharp edges likely.
