@@ -1,7 +1,8 @@
 [Unit]
 Description=Persistent data partition (UDA)
-After=banks-persist-setup.service
+After=banks-persist-setup.service dev-disk-by\x2dpartlabel-UDA.device
 Requires=banks-persist-setup.service
+BindsTo=dev-disk-by\x2dpartlabel-UDA.device
 
 [Mount]
 What=/dev/disk/by-partlabel/UDA

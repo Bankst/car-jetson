@@ -1,12 +1,13 @@
 [Unit]
 Description=Bind-mount persistent data over volatile paths
-After=data.mount
-Requires=data.mount
+After=local-fs.target banks-persist-setup.service
+Requires=banks-persist-setup.service
 Before=bluetooth.service sshd.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+ExecCondition=/bin/mountpoint -q /data
 ExecStart=/usr/sbin/banks-persist-bind
 
 [Install]

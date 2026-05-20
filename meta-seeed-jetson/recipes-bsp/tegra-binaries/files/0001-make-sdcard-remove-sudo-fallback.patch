@@ -4,6 +4,10 @@ Subject: make-sdcard: remove sudo fallback for unprivileged flash
 Run as the invoking user — fail with EPERM instead of silently
 escalating. User must have disk group access to the block device.
 
+Make partprobe non-fatal: both partprobe and blockdev --rereadpt
+require CAP_SYS_ADMIN on some kernels even with block device write
+access. The initrd re-reads partitions independently.
+
 --- a/make-sdcard.sh
 +++ b/make-sdcard.sh
 @@ -12,8 +12,6 @@
@@ -15,3 +19,13 @@ escalating. User must have disk group access to the block device.
  usage() {
      cat <<EOF
 
+@@ -451,10 +449,7 @@
+ if [ -b "$output" ]; then
+     sleep 1
+-    if ! $SUDO partprobe "$output" >/dev/null 2>&1; then
+-	echo "ERR: partprobe failed after partitioning $output" >&2
+-	exit 1
+-    fi
++    partprobe "$output" 2>/dev/null || blockdev --rereadpt "$output" 2>/dev/null || true
+     sleep 1
+ fi
