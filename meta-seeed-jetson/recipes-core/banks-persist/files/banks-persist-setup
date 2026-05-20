@@ -1,0 +1,32 @@
+#!/bin/sh
+# Format and initialize the UDA persistent data partition if needed.
+# Runs once at first boot (or after --erase-nvme reflash).
+set -eu
+
+DEV=/dev/disk/by-partlabel/UDA
+MNT=/data
+STAMP="$MNT/.banks-persist-initialized"
+
+if [ ! -b "$DEV" ]; then
+    echo "banks-persist: UDA partition not found, skipping"
+    exit 0
+fi
+
+# Check if already formatted
+if ! blkid -o value -s TYPE "$DEV" | grep -q ext4; then
+    echo "banks-persist: formatting UDA as ext4"
+    mkfs.ext4 -q -L banks-data "$DEV"
+fi
+
+mkdir -p "$MNT"
+mount "$DEV" "$MNT" 2>/dev/null || true
+
+if [ ! -f "$STAMP" ]; then
+    echo "banks-persist: initializing persistent directories"
+    mkdir -p "$MNT/bluetooth"
+    mkdir -p "$MNT/ssh"
+    mkdir -p "$MNT/config"
+    touch "$STAMP"
+fi
+
+umount "$MNT" 2>/dev/null || true

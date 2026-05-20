@@ -1,0 +1,18 @@
+#!/bin/sh
+# Bind-mount persistent data from /data over volatile rootfs paths.
+# Copies current rootfs state into /data on first run so nothing is lost.
+set -eu
+
+bind_dir() {
+    local src="$1" dst="$2"
+    [ -d "$src" ] || mkdir -p "$src"
+    [ -d "$dst" ] || mkdir -p "$dst"
+    # Seed persistent copy from rootfs if empty
+    if [ -z "$(ls -A "$src" 2>/dev/null)" ]; then
+        cp -a "$dst"/. "$src"/ 2>/dev/null || true
+    fi
+    mount --bind "$src" "$dst"
+}
+
+bind_dir /data/bluetooth /var/lib/bluetooth
+bind_dir /data/ssh       /etc/ssh
