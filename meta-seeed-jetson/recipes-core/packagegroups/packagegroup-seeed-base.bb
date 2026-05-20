@@ -77,6 +77,7 @@ RDEPENDS:${PN} = " \
     \
     banks-root-authorized-keys \
     efi-timeout \
+    banks-persist \
 "
 
 # Mask conflicting network managers in the rootfs.

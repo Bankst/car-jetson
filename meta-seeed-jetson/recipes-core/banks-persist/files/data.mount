@@ -1,0 +1,13 @@
+[Unit]
+Description=Persistent data partition (UDA)
+After=banks-persist-setup.service
+Requires=banks-persist-setup.service
+
+[Mount]
+What=/dev/disk/by-partlabel/UDA
+Where=/data
+Type=ext4
+Options=defaults,noatime
+
+[Install]
+WantedBy=local-fs.target
