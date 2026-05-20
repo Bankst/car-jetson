@@ -1,0 +1,11 @@
+[Unit]
+Description=Bridge AVRCP commands from BT headsets to phone
+After=bluetooth.service
+
+[Service]
+ExecStart=/usr/bin/banks-avrcp-bridge
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
