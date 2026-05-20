@@ -14,5 +14,21 @@ bind_dir() {
     mount --bind "$src" "$dst"
 }
 
+bind_file() {
+    local src="$1" dst="$2"
+    # Seed from rootfs if persistent copy doesn't exist
+    if [ ! -f "$src" ] && [ -f "$dst" ]; then
+        cp -a "$dst" "$src"
+    fi
+    [ -f "$src" ] || return 0
+    mount --bind "$src" "$dst"
+}
+
 bind_dir /data/bluetooth /var/lib/bluetooth
-bind_dir /data/ssh       /etc/ssh
+
+# Persist SSH host keys only — not sshd_config (that comes from rootfs)
+mkdir -p /data/ssh
+for key in /etc/ssh/ssh_host_*; do
+    [ -f "$key" ] || continue
+    bind_file "/data/ssh/$(basename "$key")" "$key"
+done
