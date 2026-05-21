@@ -44,7 +44,7 @@ meta-seeed-jetson/                     local Yocto layer
   conf/machine/jetson-xavier-nx-a203.conf
   recipes-bsp/tegra-bsp-a203/          A203 DTBs + pinmux from Seeed's pack
   recipes-bsp/tegra-bootfiles/         pinmux substitution bbappend
-  recipes-bsp/seeed-a203-iface/        CAN @ 500kbps, spidev, modules-load
+  recipes-bsp/banks-jetson-iface/      CAN @ 500kbps, spidev, modules-load (any Xavier NX carrier)
   recipes-kernel/linux/                kernel config fragment (CAN/SPI/USB-modem)
   recipes-core/packagegroups/          base + per-DE packagegroups
   recipes-core/images/                 image recipes
