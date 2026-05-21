@@ -1,0 +1,57 @@
+From: Banks Troutman <banks.troutman@oxos.com>
+Date: Wed, 20 May 2026 12:00:00 -0400
+Subject: [PATCH] PlatformBootManagerLib: suppress UEFI splash phase
+
+The L4T R35 UEFI BDS PlatformBootManagerAfterConsole runs three
+cosmetic / probe blocks before BdsWait:
+
+  - BootLogoEnableLogo() paints the splash bitmap and emits ANSI
+    cursor sequences to the serial ConOut.
+  - DisplaySystemAndHotkeyInformation() reprints the firmware banner
+    and the ESC/F11/Enter hotkey hints to GOP and to serial.
+  - MemoryTest() locates two protocols and runs an outer TestModes
+    loop even when every *Enabled flag in PcdMemoryTest is FALSE.
+
+On a headless Xavier NX A203 the user-visible "splash" between
+NvDisp-Init failing (no HDMI) and L4TLauncher firing is dominated by
+these blocks. Disable all three. ConOut still produces serial text
+output for L4TLauncher and the kernel EFI stub. BdsWait countdown is
+already skipped via the Timeout EFI variable (=0). BootOrder
+enumeration and the L4TLauncher boot path are untouched.
+
+Signed-off-by: Banks Troutman <banks.troutman@oxos.com>
+---
+--- a/Silicon/NVIDIA/Library/PlatformBootManagerLib/PlatformBm.c
++++ b/Silicon/NVIDIA/Library/PlatformBootManagerLib/PlatformBm.c
+@@ -1757,21 +1757,24 @@
+   )
+ {
+   //
+-  // Show the splash screen.
++  // Banks: suppress splash. BootLogoEnableLogo() blits the splash bitmap to
++  // the GOP and emits ANSI cursor sequences to serial ConOut.
+   //
+-  BootLogoEnableLogo ();
++  // BootLogoEnableLogo ();
+ 
+   if (!IsSingleBootNeeded ()) {
+     //
+-    // Display system and hotkey information after console is ready.
++    // Banks: suppress the firmware banner + ESC/F11/Enter hotkey reprint.
++    // This is the visible "splash text" on the serial console.
+     //
+-    DisplaySystemAndHotkeyInformation ();
++    // DisplaySystemAndHotkeyInformation ();
+   }
+ 
+   //
+-  // Run memory test
++  // Banks: skip memory test entirely. Even when every *Enabled flag in
++  // PcdMemoryTest is FALSE the protocol locate + outer loop still runs.
+   //
+-  MemoryTest ();
++  // MemoryTest ();
+ 
+   // Ipmi communication
+   PrintBmcIpAddresses ();
+--
