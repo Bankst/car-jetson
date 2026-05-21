@@ -1,7 +1,16 @@
 [Unit]
 Description=Banks Jetson Linux USB device-mode gadget
-After=systemd-modules-load.service
-Before=network.target NetworkManager.service
+# Run as early as possible — tegra-xudc is ready by ~2.6s, but if we wait
+# for basic.target (the default for multi-user.target services) we don't
+# start until ~12s. DefaultDependencies=no + WantedBy=sysinit.target lets
+# us bind the UDC as soon as configfs is mounted, eliminating ~9s of
+# idle time during which the USB device is enumerated by the host as
+# "no configuration".
+DefaultDependencies=no
+After=sys-kernel-config.mount systemd-modules-load.service
+Wants=sys-kernel-config.mount
+Before=sysinit.target network.target NetworkManager.service shutdown.target
+Conflicts=shutdown.target
 ConditionPathExists=/sys/class/udc
 
 [Service]
@@ -10,4 +19,4 @@ RemainAfterExit=yes
 ExecStart=/usr/sbin/banks-usb-gadget.sh
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=sysinit.target

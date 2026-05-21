@@ -1,14 +1,15 @@
-SUMMARY = "A203 V2 interface bring-up: CAN0 @ 500kbps, SPIDEV, USB-modem modules"
-DESCRIPTION = "Configures NetworkManager to bring up can0 at 500 kbps and \
-loads spidev / can / usb-modem kernel modules at boot. Targets the A203 V2 \
-carrier with Xavier NX."
+SUMMARY = "Banks Jetson interface bring-up: CAN0 @ 500kbps, SPIDEV, USB gadget"
+DESCRIPTION = "Carrier-agnostic NX interface bring-up: NetworkManager keyfile \
+for can0 at 500 kbps, modules-load entries for spidev/can/usb-modem, and a \
+configfs-based USB gadget (CDC-NCM ethernet + CDC-ACM serial) bridged via \
+NetworkManager. Works on any Xavier NX — A203, devkit (P3509), etc."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-COMPATIBLE_MACHINE = "jetson-xavier-nx-a203"
+COMPATIBLE_MACHINE = "(jetson-xavier-nx-a203|jetson-xavier-nx-banks-devkit)"
 
 SRC_URI = " \
-    file://seeed-a203-modules.conf \
+    file://banks-jetson-modules.conf \
     file://can0-up.sh \
     file://can0-up.service \
     file://banks-usb-gadget.sh \
@@ -29,8 +30,8 @@ RDEPENDS:${PN} = "networkmanager iproute2 kmod"
 
 do_install() {
     install -d ${D}${sysconfdir}/modules-load.d
-    install -m 0644 ${WORKDIR}/seeed-a203-modules.conf \
-        ${D}${sysconfdir}/modules-load.d/seeed-a203.conf
+    install -m 0644 ${WORKDIR}/banks-jetson-modules.conf \
+        ${D}${sysconfdir}/modules-load.d/banks-jetson.conf
 
     install -d ${D}${sbindir}
     install -m 0755 ${WORKDIR}/can0-up.sh \
@@ -60,7 +61,7 @@ do_install() {
 }
 
 FILES:${PN} = " \
-    ${sysconfdir}/modules-load.d/seeed-a203.conf \
+    ${sysconfdir}/modules-load.d/banks-jetson.conf \
     ${sbindir}/can0-up.sh \
     ${systemd_system_unitdir}/can0-up.service \
     ${nonarch_base_libdir}/udev/rules.d/90-banks-usb-gadget-managed.rules \
