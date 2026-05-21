@@ -5,12 +5,15 @@
 EFIVAR=/sys/firmware/efi/efivars/Timeout-8be4df61-93ca-11d2-aa0d-00e098032b8c
 STAMP=/var/lib/efi-timeout-configured
 
-if [ -f "$STAMP" ]; then
+if ! [ -f "$EFIVAR" ]; then
+    echo "efi-timeout: $EFIVAR not found, skipping" >&2
     exit 0
 fi
 
-if ! [ -f "$EFIVAR" ]; then
-    echo "efi-timeout: $EFIVAR not found, skipping" >&2
+# Re-check on every boot: bytes 4-5 are UINT16 timeout value (LE).
+# If already zero AND stamp present, exit fast.
+CURRENT=$(od -An -tx1 -N2 -j4 "$EFIVAR" 2>/dev/null | tr -d ' ')
+if [ "$CURRENT" = "0000" ] && [ -f "$STAMP" ]; then
     exit 0
 fi
 

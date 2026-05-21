@@ -15,7 +15,11 @@ S = "${WORKDIR}"
 inherit systemd
 
 SYSTEMD_SERVICE:${PN} = "efi-timeout.service"
-SYSTEMD_AUTO_ENABLE = "enable"
+# Disabled by default: the Timeout EFI var is written at flash time by
+# tegra-flash-init's /init-extra.d/30-efi-timeout.sh (installed via this
+# recipe's bbappend on tegra-flash-init). The rootfs service is kept as a
+# manual backstop — `systemctl start efi-timeout` to re-write.
+SYSTEMD_AUTO_ENABLE = "disable"
 
 do_install() {
     install -d ${D}${sbindir}
