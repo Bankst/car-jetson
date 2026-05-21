@@ -25,6 +25,33 @@ banks_bake_unit_fixes() {
         ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/${unit}
     done
 
+    # Mask NetworkManager-wait-online — blocks network-online.target ~5.7s on
+    # boots where NM hasn't fully settled (no Wi-Fi auth yet, link state in
+    # flux). Nothing in our image legitimately needs network-online; userspace
+    # services that talk to network re-resolve on first transient failure.
+    ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/NetworkManager-wait-online.service
+
+    # Boot-time noise reduction: mask services that nothing on this image
+    # depends on but which still cost CPU + serialize on the multi-user.target
+    # pull-up. Each saves 50-400ms of startup work.
+    #   nvphs        : NVIDIA Performance HSD; 400ms cold start, only matters
+    #                  if you use nvpmodel CLI to query throttling.
+    #   sysstat      : sar log collection — not used on this image.
+    #   rpcbind      : NFS portmapper — no NFS exports/mounts.
+    #   busybox-syslog + busybox-klogd : journald already captures everything;
+    #                  these dual-log to /var/log/messages for free disk wear.
+    for unit in nvphs.service sysstat.service rpcbind.service rpcbind.socket \
+                busybox-syslog.service busybox-klogd.service; do
+        ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/${unit}
+    done
+
+    # /etc/resolv.conf -> systemd-resolved stub. Without this, dnsmasq spawned
+    # by NM for l4tbr0 (method=shared) errors with "directory /etc/resolv.conf
+    # for resolv-file is missing" each time the bridge enters forwarding state,
+    # cascading into a usb0 slave thrash loop.
+    ln -sf ../run/systemd/resolve/stub-resolv.conf \
+        ${IMAGE_ROOTFS}${sysconfdir}/resolv.conf
+
     # Use pre-forked sshd (not socket-activated) — eliminates PAM thread IPC overhead.
     # UsePAM no in sshd_config means OpenSSH handles passwords natively; no logind
     # session needed (linger handles /run/user/UID for XDG).
