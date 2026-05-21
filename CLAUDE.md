@@ -55,13 +55,13 @@ meta-seeed-jetson/
     tegra-bsp-a203/                       # ships A203 DTBs + pinmux from Seeed's JP 5.1.4 driver pack via deploy class
       files/                              # 3 DTBs + 1 pinmux .cfg, byte-for-byte from _input/203_jp514.tar.gz
     tegra-bootfiles/                      # pinmux substitution bbappend on meta-tegra's tegra-bootfiles
-    seeed-a203-iface/
+    banks-jetson-iface/                   # carrier-agnostic NX interface bring-up; included via MACHINE_EXTRA_RDEPENDS by both A203 and devkit machine confs
       banks-usb-gadget.sh                 # configfs-based USB gadget setup: NCM ethernet on usb0, ACM serial on ttyGS0
       banks-usb-gadget.service            # systemd, runs at boot before NetworkManager
       l4tbr0.nmconnection                 # NM keyfile: bridge with method=shared (auto DHCP server on 192.168.55.1/24)
       l4t-gadget-usb0.nmconnection        # NM keyfile: usb0 as bridge slave
       can0.nmconnection                   # CAN0 at 500kbps
-      seeed-a203-modules.conf             # /etc/modules-load.d/ — mttcan, can*, spidev
+      banks-jetson-modules.conf           # /etc/modules-load.d/ — mttcan, can*, spidev
   recipes-graphics/
     banks-kiosk/                          # kiosk session: weston + media player TUI + shell toggle (triggerhappy)
       files/banks-media-player            # BT AVRCP media controller (Python curses TUI)
@@ -337,7 +337,7 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
 
 8. **Cellular Quectel modem userspace + audio init script from the driver pack — DEFERRED.** Quectel is in `203_jp514.tar.gz` under `rootfs/leetop/quectel/`; A203 audio init is `code_spkmic.sh + startup.service`. Re-package both as recipes only if user actually needs them.
 
-9. **USB gadget approach: NM owns the bridge.** We do *not* install meta-tegra's `l4t-usb-device-mode` recipe — it ships only systemd-networkd `.network`/`.netdev` files (and even then it's incomplete — the actual gadget creation script is missing from meta-tegra; NVIDIA ships it in their `nv-l4t-usb-device-mode` deb which meta-tegra doesn't pull in). Our setup: a small `banks-usb-gadget.sh` configfs script + systemd unit + NM keyfiles for the bridge, all under `recipes-bsp/seeed-a203-iface/`.
+9. **USB gadget approach: NM owns the bridge.** We do *not* install meta-tegra's `l4t-usb-device-mode` recipe — it ships only systemd-networkd `.network`/`.netdev` files (and even then it's incomplete — the actual gadget creation script is missing from meta-tegra; NVIDIA ships it in their `nv-l4t-usb-device-mode` deb which meta-tegra doesn't pull in). Our setup: a small `banks-usb-gadget.sh` configfs script + systemd unit + NM keyfiles for the bridge, all under `recipes-bsp/banks-jetson-iface/` (carrier-agnostic; works on A203 and devkit P3509).
 
 10. **GCC 13 vs L4T 5.10 kernel — three layers of fixes required.** L4T 5.10 was authored for GCC 11; scarthgap GCC 13 promotes four new warning classes to errors. Fixes:
     - **KCFLAGS** in `linux-tegra_%.bbappend`: `KCFLAGS='-Wno-address -Wno-implicit-fallthrough -Wno-int-in-bool-context -Wno-tautological-compare'` covers in-tree warnings from trace macros, ACPI, nvidia display, and the r8168 OOT module.
@@ -369,6 +369,10 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
     - **UDA mount**: fstab entry with `nofail,x-systemd.device-timeout=30` — added by `banks-persist-setup` on first boot. Setup service uses `Wants=dev-disk-by\x2dpartlabel-UDA.device` to wait for NVMe enumeration.
     - **SSH persistence**: bind-mount individual `ssh_host_*` key files, NOT the entire `/etc/ssh/`. Binding the whole dir overwrites rootfs `sshd_config` with stale UDA copy, reverting UsePAM/KEX optimizations.
     - **Triggerhappy socket activation**: must be masked in kiosk image. Socket-activated `thd` ignores `--deviceglob` and waits for `th-cmd --passfd` from udev — keyboard hotkeys silently stop working.
+
+18. **Tegra SoC audio (AHUB / ADMAIF / ADSP / I2S / DMIC / DSPK / AMX / ADX / SFC / MVC / MIXER / AFC / IQC / OPE / ARAD / ASRC) disabled in `no-audio-soc.cfg`.** A203 V2 and bare devkit have no I2S DAC, DMIC, or DSPK pins wired. The Tegra audio crossbar fabric is dead weight on these boards. Keeping the drivers built triggers (a) ~17 modules loading during udev coldplug, (b) `tegra210_adsp` driver iterating FE/BE DAI links from the generic `tegrasndt186ref` machine driver and spamming `Broken Path1 - FE not linked to BE` (~14 messages, ~3s of post-login log churn) because the DT enables ADSP DAI nodes that the machine driver doesn't pair with any BE on a board with no I2S routing. **Kept on:** `SND_HDA_TEGRA` (HDMI audio out), `SND_USB_AUDIO` (USB headsets — current audio path via PipeWire + BT A2DP), and the kernel core sound subsystem.
+    - **If/when I2S in/out is wired on a future carrier**: revert `no-audio-soc.cfg` (`git rm meta-seeed-jetson/recipes-kernel/linux/linux-tegra/no-audio-soc.cfg` + drop the SRC_URI line in `linux-tegra_%.bbappend`). The "Broken Path" spam can then be silenced via either (a) DT overlay disabling unused ADSP DAI nodes (`status = "disabled"` on the offending `tegra210-adsp-audio` children in the carrier DTSI), (b) a custom machine driver scoped to the actual I2S routing instead of the generic `tegrasndt186ref`, or (c) demoting the `dev_err` → `dev_dbg` in `tegra210_adsp_alt.c` at `tegra-alt/tegra210_adsp_alt.c:1409` and `:1734`. Option (a) is cleanest. The audio HW block reference is documented in `docs/boot-optimization-2026-05-20/` (or ask me — see "tegra audio block diagram" tags in session memory).
+    - **OPE specifically**: lives inside AHUB. Reaching OPE from software requires AHUB + ADMAIF (SW→HUB DMA gateway) + a physical output (I2S or DSPK). HDMI audio uses HDA, separate from AHUB. So enabling OPE requires both restoring `no-audio-soc.cfg` items AND wiring a DAC pin route. PipeWire feeds ADMAIF for HUB-routed paths.
 
 ## Open follow-ups
 
