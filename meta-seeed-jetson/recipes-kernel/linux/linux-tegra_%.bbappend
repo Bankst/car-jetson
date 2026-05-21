@@ -1,19 +1,31 @@
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
-SRC_URI:append:jetson-xavier-nx-a203 = " \
+# Kernel feature config fragments — apply to ALL Xavier NX builds. Both A203
+# and devkit expose CAN/SPI on the 40-pin header and support USB gadget mode.
+# Userspace bring-up (interface configs, gadget script, NM keyfiles) lives
+# in banks-jetson-iface and is machine-gated via MACHINE_EXTRA_RDEPENDS in
+# each machine conf.
+SRC_URI:append = " \
     file://can.cfg \
     file://spi.cfg \
     file://usb-modem.cfg \
     file://usb-gadget.cfg \
     file://dt-overlay.cfg \
     file://overlayfs.cfg \
-    file://0002-nvgpu-drop-gcc13-implicit-fallthrough-override.patch \
+    file://no-camera.cfg \
+    file://no-bloat.cfg \
+    file://no-debug.cfg \
+    file://no-audio-soc.cfg \
+    file://feature-adds.cfg \
 "
 
-# L4T 5.10 was authored for GCC 11; GCC 13 (scarthgap) promotes several new
-# warnings to errors via -Werror.  Suppress the three that actually fire:
-#   -Waddress        : trace/events/*.h macro NULL-address comparisons
-#   -Wimplicit-fallthrough : acpica/dscontrol.c
+# GCC 13 (scarthgap) compatibility — applies to ALL Xavier NX builds. L4T
+# 5.10 was authored for GCC 11; GCC 13 promotes several new warnings to
+# errors via -Werror. Suppressions that actually fire across machines:
+#   -Waddress              : trace/events/*.h macro NULL-address comparisons
+#   -Wimplicit-fallthrough : acpica/dscontrol.c, tegra dc/dsi.c (devkit)
 #   -Wint-in-bool-context  : nvidia display driver ternary expressions
-EXTRA_OEMAKE:append:jetson-xavier-nx-a203 = " KCFLAGS='-Wno-address -Wno-implicit-fallthrough -Wno-int-in-bool-context -Wno-tautological-compare'"
+#   -Wtautological-compare : misc r8168 OOT module
+SRC_URI:append = " file://0002-nvgpu-drop-gcc13-implicit-fallthrough-override.patch"
+EXTRA_OEMAKE:append = " KCFLAGS='-Wno-address -Wno-implicit-fallthrough -Wno-int-in-bool-context -Wno-tautological-compare'"
 
