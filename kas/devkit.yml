@@ -1,0 +1,19 @@
+header:
+  version: 14
+  includes:
+    - base.yml
+
+# Override MACHINE for stock NVIDIA Xavier NX Developer Kit (P3509) carrier.
+# Devkit has full debug UART out (J14 header + microUSB FTDI) for early-boot
+# logs that the A203 V2 carrier does not expose.
+#
+# Module is the same (Xavier NX eMMC); carrier-specific bits (A203 DTB
+# substitution, tegra-bsp-a203 pinmux) are gated by MACHINE name in the A203
+# conf so they do NOT come along here. Common NX userspace (CAN, SPI, USB
+# gadget) lives in banks-jetson-iface and is included by BOTH machines.
+#
+# Rootfs still lives on NVMe (TNSPEC_BOOTDEV = nvme0n1p1). Devkit needs an
+# M.2 NVMe installed; if you only have the bare devkit, swap to stock
+# `jetson-xavier-nx-devkit-emmc` for internal-eMMC rootfs.
+
+machine: jetson-xavier-nx-banks-devkit
