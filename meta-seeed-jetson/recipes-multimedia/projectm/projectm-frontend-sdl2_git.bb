@@ -4,7 +4,10 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE.md;md5=9cb07c5bfd74f03f1500637760a49640"
 
 SRC_URI = "gitsm://github.com/projectM-visualizer/frontend-sdl2.git;protocol=https;branch=master"
-SRCREV = "${AUTOREV}"
+# Pinned. AUTOREV hits GitHub at parse time, which breaks builds when
+# container DNS is flaky (e.g. Tailscale MagicDNS upstream issues). Bump
+# manually via `git ls-remote ... HEAD` when a refresh is wanted.
+SRCREV = "49863dd3343f8fe926c0d50db2436aa52db2aec6"
 PV = "0.0+git"
 
 S = "${WORKDIR}/git"
