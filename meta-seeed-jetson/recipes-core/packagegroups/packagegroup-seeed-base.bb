@@ -16,12 +16,15 @@ RDEPENDS:${PN} = " \
     networkmanager \
     networkmanager-nmcli \
     networkmanager-nmtui \
+    dnsmasq \
     iproute2 \
     iputils \
     \
     bluez5 \
     wireless-regdb-static \
     linux-firmware-qca \
+    linux-firmware-ath10k \
+    linux-firmware-iwlwifi \
     bt-audio-agent \
     \
     pipewire \
