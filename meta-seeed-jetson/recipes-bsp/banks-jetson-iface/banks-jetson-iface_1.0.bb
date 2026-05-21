@@ -10,6 +10,7 @@ COMPATIBLE_MACHINE = "(jetson-xavier-nx-a203|jetson-xavier-nx-banks-devkit)"
 
 SRC_URI = " \
     file://banks-jetson-modules.conf \
+    file://banks-modprobe-blacklist.conf \
     file://can0-up.sh \
     file://can0-up.service \
     file://banks-usb-gadget.sh \
@@ -32,6 +33,10 @@ do_install() {
     install -d ${D}${sysconfdir}/modules-load.d
     install -m 0644 ${WORKDIR}/banks-jetson-modules.conf \
         ${D}${sysconfdir}/modules-load.d/banks-jetson.conf
+
+    install -d ${D}${sysconfdir}/modprobe.d
+    install -m 0644 ${WORKDIR}/banks-modprobe-blacklist.conf \
+        ${D}${sysconfdir}/modprobe.d/banks-blacklist.conf
 
     install -d ${D}${sbindir}
     install -m 0755 ${WORKDIR}/can0-up.sh \
@@ -62,6 +67,7 @@ do_install() {
 
 FILES:${PN} = " \
     ${sysconfdir}/modules-load.d/banks-jetson.conf \
+    ${sysconfdir}/modprobe.d/banks-blacklist.conf \
     ${sbindir}/can0-up.sh \
     ${systemd_system_unitdir}/can0-up.service \
     ${nonarch_base_libdir}/udev/rules.d/90-banks-usb-gadget-managed.rules \
