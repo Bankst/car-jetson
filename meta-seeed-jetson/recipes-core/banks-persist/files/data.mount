@@ -1,14 +1,15 @@
 [Unit]
 Description=Persistent data partition (UDA)
-After=banks-persist-setup.service dev-disk-by\x2dpartlabel-UDA.device
-Requires=banks-persist-setup.service
+# UDA is pre-formatted at flash time by init-extra.d/50-format-uda.sh
+# (in the flashing initrd). No on-boot setup service needed.
+After=dev-disk-by\x2dpartlabel-UDA.device
 BindsTo=dev-disk-by\x2dpartlabel-UDA.device
 
 [Mount]
 What=/dev/disk/by-partlabel/UDA
 Where=/data
 Type=ext4
-Options=defaults,noatime
+Options=defaults,noatime,nofail,x-systemd.device-timeout=30
 
 [Install]
 WantedBy=local-fs.target

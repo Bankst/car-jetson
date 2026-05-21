@@ -1,7 +1,7 @@
 [Unit]
 Description=Bind-mount persistent data over volatile paths
-After=local-fs.target banks-persist-setup.service
-Requires=banks-persist-setup.service
+After=local-fs.target data.mount
+Requires=data.mount
 Before=bluetooth.service sshd.service
 
 [Service]
