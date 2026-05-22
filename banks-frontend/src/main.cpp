@@ -1,0 +1,66 @@
+#include <QGuiApplication>
+#include <QQmlApplicationEngine>
+#include <QQuickWindow>
+#include <QQuickStyle>
+#include <QSGRendererInterface>
+#include <QSurfaceFormat>
+#include <QVariant>
+
+#include <QLoggingCategory>
+
+#include "AudioCapture.h"
+#include "Visualizer.h"
+#include "SpectrumWidget.h"
+#include "ImGuiOverlay.h"
+#include "Log.h"
+
+int main(int argc, char** argv) {
+    // Verbose Qt scene-graph info to stderr by default in dev builds.
+    qputenv("QSG_INFO", "1");
+    QLoggingCategory::setFilterRules(
+        "qt.scenegraph.general=true\n"
+        "banks.*=true\n"
+    );
+
+    qInfo("[banks-frontend] starting, pid=%lld", (long long)QCoreApplication::applicationPid());
+
+    // Force GLES rendering — projectM built ENABLE_GLES=ON, must match.
+    QSurfaceFormat fmt;
+    fmt.setRenderableType(QSurfaceFormat::OpenGLES);
+    fmt.setVersion(3, 0);
+    fmt.setDepthBufferSize(24);
+    fmt.setStencilBufferSize(8);
+    QSurfaceFormat::setDefaultFormat(fmt);
+    qInfo("[banks-frontend] requested GL: OpenGLES 3.0, depth=24, stencil=8");
+
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    qInfo("[banks-frontend] RHI backend pinned: OpenGL");
+
+    QGuiApplication app(argc, argv);
+    QQuickStyle::setStyle("Basic");
+
+    // Process-wide audio capture singleton. Lives for full app lifetime so
+    // both Visualizer and SpectrumWidget can borrow it as they enter/leave
+    // the scene.
+    auto* audio = new AudioCapture();
+    audio->start();
+    // QObject parent for cleanup
+    app.setProperty("audioCapturePtr", QVariant::fromValue<quintptr>(reinterpret_cast<quintptr>(audio)));
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, [audio]{
+        audio->stop();
+        delete audio;
+    });
+    qInfo("[banks-frontend] audio capture singleton started, consumers=%d", audio->consumerCount());
+
+    qmlRegisterType<Visualizer>("BanksFrontend", 1, 0, "Visualizer");
+    qmlRegisterType<SpectrumWidget>("BanksFrontend", 1, 0, "SpectrumWidget");
+
+    QQmlApplicationEngine engine;
+    engine.loadFromModule("BanksFrontend", "Main");
+    if (engine.rootObjects().isEmpty()) return 1;
+
+    auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
+    ImGuiOverlay::installOn(win);
+
+    return app.exec();
+}
