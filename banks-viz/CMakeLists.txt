@@ -5,7 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Default prefix /usr (not /usr/local) so packaging + DEFAULT_PRESET_PATH align.
+# MUST precede include(GNUInstallDirs) — that module bakes CMAKE_INSTALL_FULL_*.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "" FORCE)
+endif()
+
 include(FetchContent)
+include(GNUInstallDirs)
 
 # --- ImGui (no CMakeLists.txt in repo; compile sources manually) ---
 FetchContent_Declare(imgui
@@ -30,6 +37,30 @@ FetchContent_GetProperties(libprojectM)
 if(NOT libprojectm_POPULATED)
     FetchContent_Populate(libprojectM)
     add_subdirectory(${libprojectm_SOURCE_DIR} ${libprojectm_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
+
+# --- Cream of the Crop presets (Jason Fletcher's curated Milkdrop pack) ---
+set(BANKS_VIZ_FETCH_PRESETS ON CACHE BOOL
+    "Fetch projectM 'Cream of the Crop' presets at configure time")
+set(BANKS_VIZ_PRESET_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/projectMSDL/presets" CACHE STRING
+    "Install destination (relative to CMAKE_INSTALL_PREFIX) for bundled presets")
+
+if(BANKS_VIZ_FETCH_PRESETS)
+    FetchContent_Declare(presets_cream
+        GIT_REPOSITORY https://github.com/projectM-visualizer/presets-cream-of-the-crop.git
+        GIT_TAG        master
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(presets_cream)
+
+    install(DIRECTORY ${presets_cream_SOURCE_DIR}/
+            DESTINATION ${BANKS_VIZ_PRESET_INSTALL_DIR}
+            FILES_MATCHING
+                PATTERN "*.milk"
+                PATTERN "*.prjm"
+                PATTERN ".git*" EXCLUDE
+                PATTERN "*.md"  EXCLUDE
+    )
 endif()
 
 # --- System dependencies ---
@@ -59,7 +90,7 @@ target_link_libraries(imgui PUBLIC PkgConfig::SDL2 PkgConfig::GLESV2)
 target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_ES3)
 
 # --- App ---
-set(DEFAULT_PRESET_PATH "/usr/share/projectMSDL/presets" CACHE STRING
+set(DEFAULT_PRESET_PATH "${CMAKE_INSTALL_FULL_DATADIR}/projectMSDL/presets" CACHE STRING
     "Default path to projectM preset directory")
 
 add_executable(banks-viz
