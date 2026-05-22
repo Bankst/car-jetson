@@ -21,7 +21,8 @@ ROOTFS_POSTPROCESS_COMMAND:append = " banks_trim_rootfs; banks_bake_unit_fixes;"
 banks_bake_unit_fixes() {
     # Mask systemd-networkd — NM owns all interfaces; networkd causes ~100s boot delay
     for unit in systemd-networkd.service systemd-networkd-wait-online.service \
-                systemd-networkd.socket systemd-network-generator.service; do
+                systemd-networkd.socket systemd-network-generator.service \
+                NetworkManager-wait-online.service; do
         ln -sf /dev/null ${IMAGE_ROOTFS}${sysconfdir}/systemd/system/${unit}
     done
 
