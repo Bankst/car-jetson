@@ -393,6 +393,11 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
 - sstate mirror TODO.
 - Boot time: `run-postinsts` adds ~2s on first boot. Deferred `pkg_postinst` scripts from poky packages (ldconfig, etc.) could be forced to run at image build time via `ROOTFS_POSTPROCESS_COMMAND` or ensuring all postinsts are build-time-safe. Low priority — only affects first boot, self-removes.
 
+## Workflow preferences
+
+- **Agent spawning**: always ask about worktree isolation before spawning an Agent (via `AskUserQuestion`), unless the user already specified for this session. Recommend worktree for multi-file rewrites/experiments; in-place for small focused edits.
+- **Agent execution**: always spawn agents with `run_in_background: true` unless the user explicitly asks to wait.
+
 ## Memory
 
 Auto-memory for this project lives at `~/.claude/projects/-mnt-yoctoworkspace-nx-car-jetson/memory/`. Three files there:
