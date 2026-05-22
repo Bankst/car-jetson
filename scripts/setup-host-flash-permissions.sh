@@ -15,13 +15,14 @@ else
     echo "    Relogin required for group change to take effect."
 fi
 
-# 2. Polkit rule for udisksctl mount
-if pkcheck --action-id org.freedesktop.udisks2.filesystem-mount \
-     --process $$ --allow-user-interaction >/dev/null 2>&1; then
+# 2. Polkit rule for udisksctl mount (initrd-flash uses udisksctl)
+POLKIT_RULE=/etc/polkit-1/rules.d/50-udisks-noauth.rules
+if [ -f "$POLKIT_RULE" ]; then
     echo "[ok] polkit udisks mount rule"
 else
     echo "[install] polkit udisks mount rule"
-    sudo tee /etc/polkit-1/rules.d/50-udisks-noauth.rules > /dev/null << 'EOF'
+    sudo mkdir -p /etc/polkit-1/rules.d
+    sudo tee "$POLKIT_RULE" > /dev/null << 'EOF'
 polkit.addRule(function(action, subject) {
     if ((action.id == "org.freedesktop.udisks2.filesystem-mount" ||
          action.id == "org.freedesktop.udisks2.filesystem-mount-other-seat" ||
@@ -31,6 +32,7 @@ polkit.addRule(function(action, subject) {
     }
 });
 EOF
+    sudo systemctl restart polkit
 fi
 
 # 3. udev rule for Tegra recovery USB
