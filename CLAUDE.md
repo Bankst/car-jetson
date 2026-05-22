@@ -391,6 +391,7 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
 - Plasma image (`kas/plasma.yml`) build not yet attempted. Expect KDE Plasma 6 Wayland via KWin; first time on Tegra so sharp edges likely.
 - LXQt variant kas/recipe pair when ready.
 - sstate mirror TODO.
+- Boot time: `run-postinsts` adds ~2s on first boot. Deferred `pkg_postinst` scripts from poky packages (ldconfig, etc.) could be forced to run at image build time via `ROOTFS_POSTPROCESS_COMMAND` or ensuring all postinsts are build-time-safe. Low priority — only affects first boot, self-removes.
 
 ## Memory
 
