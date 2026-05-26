@@ -18,6 +18,8 @@
 
 #include <f1x/openauto/autoapp/App.hpp>
 #include <f1x/openauto/autoapp/Service/AndroidAutoEntityFactory.hpp>
+#include <f1x/openauto/btservice/BluetoothHandler.hpp>
+#include <f1x/openauto/btservice/AndroidBluetoothService.hpp>
 #include <f1x/openauto/Common/Log.hpp>
 
 #include <QDebug>
@@ -264,6 +266,18 @@ void AASessionController::startUSB() {
 
     setStatus(QStringLiteral("Scanning for devices..."));
     m_app->waitForUSBDevice();
+
+    // Start Bluetooth handler for wireless AA discovery
+    try {
+        auto btService = std::make_shared<f1x::openauto::btservice::AndroidBluetoothService>();
+        m_btHandler = std::make_unique<f1x::openauto::btservice::BluetoothHandler>(
+            std::move(btService), config);
+        OPENAUTO_LOG(info) << "[AASessionController] BT wireless AA handler started";
+    } catch (const std::exception& e) {
+        OPENAUTO_LOG(warning) << "[AASessionController] BT handler failed: " << e.what()
+                              << " (wireless AA unavailable, USB still works)";
+    }
+
     setStatus(QStringLiteral("Waiting for phone..."));
 
     // Install a frame callback on the decoder to detect when the phone
@@ -345,6 +359,7 @@ void AASessionController::stopUSB() {
     for (auto& t : m_usbThreads) if (t.joinable()) t.join();
     m_usbThreads.clear();
 
+    if (m_btHandler) { m_btHandler->shutdownService(); m_btHandler.reset(); }
     m_app.reset();
     m_entityFactory.reset();
     m_accessoryEnum.reset();

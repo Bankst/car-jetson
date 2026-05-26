@@ -17,6 +17,7 @@ namespace aasdk::usb { class USBWrapper; class IUSBHub; class IConnectedAccessor
 namespace aasdk::tcp { class ITCPWrapper; }
 namespace f1x::openauto::autoapp { class App; }
 namespace f1x::openauto::autoapp::service { class IAndroidAutoEntityFactory; }
+namespace f1x::openauto::btservice { class BluetoothHandler; }
 
 class AASessionController : public QObject {
     Q_OBJECT
@@ -90,6 +91,7 @@ private:
     std::shared_ptr<aasdk::usb::IConnectedAccessoriesEnumerator> m_accessoryEnum;
     std::unique_ptr<f1x::openauto::autoapp::service::IAndroidAutoEntityFactory> m_entityFactory;
     std::shared_ptr<f1x::openauto::autoapp::App> m_app;
+    std::unique_ptr<f1x::openauto::btservice::BluetoothHandler> m_btHandler;
 
     std::vector<std::thread> m_ioThreads;
     std::vector<std::thread> m_usbThreads;
