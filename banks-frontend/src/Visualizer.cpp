@@ -62,6 +62,14 @@ public:
                 case Visualizer::Cmd::ShuffleOff: projectm_playlist_set_shuffle(m_playlist, false); break;
                 case Visualizer::Cmd::LockOn:  projectm_set_preset_locked(m_pm, true);  qCInfo(logViz) << "preset locked";   break;
                 case Visualizer::Cmd::LockOff: projectm_set_preset_locked(m_pm, false); qCInfo(logViz) << "preset unlocked"; break;
+                case Visualizer::Cmd::SetSensitivity:
+                    projectm_set_beat_sensitivity(m_pm, item->m_pendingSensitivity);
+                    qCInfo(logViz) << "beat sensitivity =" << item->m_pendingSensitivity;
+                    break;
+                case Visualizer::Cmd::SetPresetDuration:
+                    projectm_set_preset_duration(m_pm, static_cast<double>(item->m_pendingPresetDuration));
+                    qCInfo(logViz) << "preset duration =" << item->m_pendingPresetDuration << "s";
+                    break;
                 case Visualizer::Cmd::SetFavoritesMode: {
                     projectm_playlist_clear(m_playlist);
                     if (item->m_pendingFavoritesOn) {
@@ -182,6 +190,8 @@ private:
         projectm_set_window_size(m_pm, w, h);
         projectm_set_mesh_size(m_pm, 64, 36);
         projectm_set_fps(m_pm, 60);
+        projectm_set_beat_sensitivity(m_pm, m_item->m_sensitivity);
+        projectm_set_preset_duration(m_pm, static_cast<double>(m_item->m_presetDuration));
         m_playlist = projectm_playlist_create(m_pm);
         qCInfo(logViz) << "  pm=" << (void*)m_pm << "playlist=" << (void*)m_playlist;
     }
@@ -307,6 +317,26 @@ void Visualizer::setLocked(bool on) {
 bool Visualizer::toggleLock() {
     setLocked(!m_locked);
     return m_locked;
+}
+
+void Visualizer::setSensitivity(float v) {
+    v = qBound(0.0f, v, 2.0f);
+    if (qFuzzyCompare(v, m_sensitivity)) return;
+    m_sensitivity = v;
+    m_pendingSensitivity = v;
+    m_pendingCmds.push_back(Cmd::SetSensitivity);
+    emit sensitivityChanged();
+    update();
+}
+
+void Visualizer::setPresetDuration(int secs) {
+    secs = qBound(5, secs, 120);
+    if (secs == m_presetDuration) return;
+    m_presetDuration = secs;
+    m_pendingPresetDuration = secs;
+    m_pendingCmds.push_back(Cmd::SetPresetDuration);
+    emit presetDurationChanged();
+    update();
 }
 
 void Visualizer::shuffle(bool on) {

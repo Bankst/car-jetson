@@ -21,6 +21,8 @@ class Visualizer : public QQuickFramebufferObject {
     Q_PROPERTY(bool canNext READ canNext NOTIFY navStateChanged)
     Q_PROPERTY(bool canPrev READ canPrev NOTIFY navStateChanged)
     Q_PROPERTY(bool locked READ locked WRITE setLocked NOTIFY lockedChanged)
+    Q_PROPERTY(float sensitivity READ sensitivity WRITE setSensitivity NOTIFY sensitivityChanged)
+    Q_PROPERTY(int presetDuration READ presetDuration WRITE setPresetDuration NOTIFY presetDurationChanged)
 
 public:
     explicit Visualizer(QQuickItem* parent = nullptr);
@@ -41,6 +43,10 @@ public:
     bool    locked() const { return m_locked; }
     void    setLocked(bool on);
     Q_INVOKABLE bool toggleLock();
+    float   sensitivity() const { return m_sensitivity; }
+    void    setSensitivity(float v);
+    int     presetDuration() const { return m_presetDuration; }
+    void    setPresetDuration(int secs);
 
     Q_INVOKABLE void next();
     Q_INVOKABLE void prev();
@@ -62,6 +68,8 @@ signals:
     void favoritesCountChanged();
     void navStateChanged();
     void lockedChanged();
+    void sensitivityChanged();
+    void presetDurationChanged();
 
 protected:
     void itemChange(ItemChange change, const ItemChangeData& data) override;
@@ -76,13 +84,17 @@ private:
     int     m_currentIndex  = -1;
     bool    m_shuffleOn     = false;
     bool    m_locked        = false;
+    float   m_sensitivity   = 1.0f;
+    int     m_presetDuration = 30;
     Favorites* m_favorites = nullptr;
     AudioCapture* m_audio = nullptr;  // borrowed singleton, owned by qApp
     std::unique_ptr<AudioRingConsumer> m_audioRing;
 
     // Command queue consumed in renderer's synchronize().
-    enum class Cmd { None, Next, Prev, ShuffleOn, ShuffleOff, ReloadPlaylist, SetFavoritesMode, LockOn, LockOff };
+    enum class Cmd { None, Next, Prev, ShuffleOn, ShuffleOff, ReloadPlaylist, SetFavoritesMode, LockOn, LockOff, SetSensitivity, SetPresetDuration };
     std::vector<Cmd> m_pendingCmds;
     QStringList m_pendingFavoritesList;  // payload for SetFavoritesMode
     bool        m_pendingFavoritesOn = false;
+    float       m_pendingSensitivity = 1.0f;
+    int         m_pendingPresetDuration = 30;
 };
