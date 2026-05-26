@@ -13,6 +13,9 @@
 #include "SpectrumWidget.h"
 #include "ImGuiOverlay.h"
 #include "Log.h"
+#include "aa/AASessionController.h"
+#include "aa/AAVideoItem.h"
+#include "aa/AudioTestController.h"
 
 int main(int argc, char** argv) {
     // Verbose Qt scene-graph info to stderr by default in dev builds.
@@ -54,6 +57,9 @@ int main(int argc, char** argv) {
 
     qmlRegisterType<Visualizer>("BanksFrontend", 1, 0, "Visualizer");
     qmlRegisterType<SpectrumWidget>("BanksFrontend", 1, 0, "SpectrumWidget");
+    qmlRegisterType<AASessionController>("BanksFrontend", 1, 0, "AASessionController");
+    qmlRegisterType<AAVideoItem>("BanksFrontend", 1, 0, "AAVideoItem");
+    qmlRegisterType<AudioTestController>("BanksFrontend", 1, 0, "AudioTestController");
 
     QQmlApplicationEngine engine;
     engine.loadFromModule("BanksFrontend", "Main");
