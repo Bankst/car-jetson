@@ -10,6 +10,8 @@ ApplicationWindow {
 
     readonly property int targetW: 1920
     readonly property int targetH: 1080
+    property bool spectrumVisible: true
+    property alias aaSession: aaPage.aaSession
     width:  1920
     height: 1080
     minimumWidth: 960; minimumHeight: 540
@@ -27,11 +29,15 @@ ApplicationWindow {
             bottom: nav.top
         }
         currentIndex: 0
+        onCurrentIndexChanged: {
+            if (currentIndex === 2) aaPage.onTabActivated()
+        }
 
         HomePage       { onOpenVisualizer: views.currentIndex = 1 }
         VisualizerPage { /* persistent — projectM lives as long as window */ }
-        Item { /* media placeholder */ }
+        AndroidAutoPage { id: aaPage }
         Item { /* CAN placeholder */ }
+        SettingsPage {}
     }
 
     // Footer nav — current view highlighted
@@ -48,8 +54,9 @@ ApplicationWindow {
                 model: [
                     { label: "Home",  idx: 0, enabled: true  },
                     { label: "Viz",   idx: 1, enabled: true  },
-                    { label: "Media", idx: 2, enabled: false },
-                    { label: "CAN",   idx: 3, enabled: false }
+                    { label: "AA",    idx: 2, enabled: true  },
+                    { label: "CAN",   idx: 3, enabled: false },
+                    { label: "Settings", idx: 4, enabled: true  }
                 ]
                 delegate: Button {
                     required property var modelData
@@ -65,13 +72,17 @@ ApplicationWindow {
     }
 
     // Persistent spectrum-analyzer overlay — draggable + resizable.
+    // Snaps to top-right when AA tab active (maps area), top-left otherwise.
     Item {
         id: spectrumFrame
-        x: 16
+        visible: root.spectrumVisible && views.currentIndex !== 4
+        x: views.currentIndex === 2 ? root.width - width - 16 : 16
         y: 16
         width:  420
         height: 120
         z: 1000
+
+        Behavior on x { NumberAnimation { duration: 250; easing.type: Easing.OutCubic } }
 
         // Body — semi-transparent dark backdrop
         Rectangle {
@@ -89,12 +100,12 @@ ApplicationWindow {
             bandCount: 48
         }
 
-        // Drag header strip — top 12px
+        // Drag strip — bottom 12px
         MouseArea {
             id: dragArea
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.top:   parent.top
+            anchors.bottom: parent.bottom
             height: 12
             cursorShape: Qt.SizeAllCursor
             drag.target: spectrumFrame
@@ -111,7 +122,7 @@ ApplicationWindow {
         Rectangle {
             id: gripVis
             width: 14; height: 14
-            x: spectrumFrame.width  - width
+            x: 0
             y: spectrumFrame.height - height
             color: gripMa.pressed ? "#a0ffffff" : "#40ffffff"
             radius: 2
@@ -119,16 +130,17 @@ ApplicationWindow {
 
         MouseArea {
             id: gripMa
-            // 24px hit box in bottom-right corner
-            x: spectrumFrame.width  - 24
+            // 24px hit box in bottom-left corner
+            x: 0
             y: spectrumFrame.height - 24
             width: 24; height: 24
-            cursorShape: Qt.SizeFDiagCursor
+            cursorShape: Qt.SizeBDiagCursor
 
             property real pressWinX: 0
             property real pressWinY: 0
             property real startW: 0
             property real startH: 0
+            property real startX: 0
             property int  moveCount: 0
 
             onPressed: function(mouse) {
@@ -136,18 +148,19 @@ ApplicationWindow {
                 pressWinX = p.x; pressWinY = p.y
                 startW    = spectrumFrame.width
                 startH    = spectrumFrame.height
+                startX    = spectrumFrame.x
                 moveCount = 0
-                console.log("[spec resize] press win=", p.x.toFixed(1), p.y.toFixed(1),
-                            " start=", startW, "x", startH)
             }
-            onReleased: console.log("[spec resize] release after", moveCount, "moves")
+            onReleased: function() {}
             onPositionChanged: function(mouse) {
                 if (!pressed) return
                 var p = mapToItem(null, mouse.x, mouse.y)
-                var nw = Math.max(160, startW + (p.x - pressWinX))
+                var dx = p.x - pressWinX
+                var nw = Math.max(160, startW - dx)
                 var nh = Math.max(60,  startH + (p.y - pressWinY))
-                spectrumFrame.width  = nw
-                spectrumFrame.height = nh
+                spectrumFrame.x      = startX + (startW - nw)
+                spectrumFrame.width   = nw
+                spectrumFrame.height  = nh
                 if ((++moveCount % 5) === 0) {
                     console.log("[spec resize] move win=", p.x.toFixed(1), p.y.toFixed(1),
                                 " size=", nw.toFixed(1), "x", nh.toFixed(1))
