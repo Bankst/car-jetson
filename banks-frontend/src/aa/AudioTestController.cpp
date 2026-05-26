@@ -6,7 +6,9 @@
 #include <spa/pod/builder.h>
 
 #include <QProcess>
+#include <QFile>
 #include <QDebug>
+#include <cmath>
 #include <cstring>
 #include <atomic>
 #include <mutex>
@@ -154,6 +156,71 @@ void AudioTestController::playRecording() {
 
 float AudioTestController::channelLevel(int) {
     return 0.0f;
+}
+
+static QString ensureToneWav(int freq, int sampleRate, int channels) {
+    QString path = QString("/tmp/banks-test-tone-%1-%2-%3.wav").arg(freq).arg(sampleRate).arg(channels);
+    if (QFile::exists(path)) return path;
+
+    const int durationMs = 1000;
+    const int numSamples = sampleRate * durationMs / 1000;
+    const int numFrames = numSamples;
+    const int dataSize = numFrames * channels * 2; // S16_LE
+
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) return {};
+
+    // WAV header
+    auto writeU32 = [&](uint32_t v) { f.write(reinterpret_cast<const char*>(&v), 4); };
+    auto writeU16 = [&](uint16_t v) { f.write(reinterpret_cast<const char*>(&v), 2); };
+
+    f.write("RIFF", 4);
+    writeU32(36 + dataSize);
+    f.write("WAVEfmt ", 8);
+    writeU32(16);                              // chunk size
+    writeU16(1);                               // PCM
+    writeU16(static_cast<uint16_t>(channels));
+    writeU32(static_cast<uint32_t>(sampleRate));
+    writeU32(static_cast<uint32_t>(sampleRate * channels * 2)); // byte rate
+    writeU16(static_cast<uint16_t>(channels * 2));              // block align
+    writeU16(16);                              // bits per sample
+    f.write("data", 4);
+    writeU32(dataSize);
+
+    // Generate sine with 10ms fade in/out to avoid click
+    const int fadeSamples = sampleRate / 100; // 10ms
+    for (int i = 0; i < numFrames; ++i) {
+        double t = static_cast<double>(i) / sampleRate;
+        double sample = std::sin(2.0 * M_PI * freq * t) * 0.6;
+        // Fade envelope
+        if (i < fadeSamples)
+            sample *= static_cast<double>(i) / fadeSamples;
+        else if (i > numFrames - fadeSamples)
+            sample *= static_cast<double>(numFrames - i) / fadeSamples;
+        auto s16 = static_cast<int16_t>(sample * 32767.0);
+        for (int c = 0; c < channels; ++c)
+            f.write(reinterpret_cast<const char*>(&s16), 2);
+    }
+    f.close();
+    return path;
+}
+
+void AudioTestController::testChannel(int ch) {
+    int freq, rate, channels;
+    QString label;
+    switch (ch) {
+    case 0: freq = 440;  rate = 48000; channels = 2; label = "Music"; break;
+    case 1: freq = 880;  rate = 16000; channels = 1; label = "Navigation"; break;
+    case 2: freq = 1200; rate = 16000; channels = 1; label = "System"; break;
+    default: return;
+    }
+    QString wav = ensureToneWav(freq, rate, channels);
+    if (wav.isEmpty()) {
+        setStatusText("Failed to create test tone");
+        return;
+    }
+    QProcess::startDetached("pw-play", {"--target=@DEFAULT_AUDIO_SINK@", wav});
+    setStatusText(QString("Test tone: %1 Hz (%2)").arg(freq).arg(label));
 }
 
 QString AudioTestController::pipewireInfo() const {

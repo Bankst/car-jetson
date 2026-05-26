@@ -43,9 +43,9 @@ Item {
 
             Repeater {
                 model: [
-                    { label: "Music (48k stereo)",     prop: "musicLevel",    node: "banks-aa-Music" },
-                    { label: "Navigation (16k mono)",  prop: "guidanceLevel", node: "banks-aa-Navigation" },
-                    { label: "System (16k mono)",      prop: "systemLevel",   node: "banks-aa-Notification" }
+                    { label: "Music (48k stereo)",     prop: "musicLevel",    node: "banks-aa-Music",        ch: 0 },
+                    { label: "Navigation (16k mono)",  prop: "guidanceLevel", node: "banks-aa-Navigation",   ch: 1 },
+                    { label: "System (16k mono)",      prop: "systemLevel",   node: "banks-aa-Notification", ch: 2 }
                 ]
                 delegate: ColumnLayout {
                     required property var modelData
@@ -69,6 +69,7 @@ Item {
                                 Behavior on width { NumberAnimation { duration: 30 } }
                             }
                         }
+                        Button { text: "Test"; flat: true; onClicked: audioTest.testChannel(modelData.ch) }
                     }
                 }
             }

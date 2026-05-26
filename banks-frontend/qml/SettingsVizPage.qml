@@ -72,6 +72,37 @@ Item {
 
             Rectangle { Layout.fillWidth: true; height: 1; color: "#333" }
 
+            // --- Timing & Sensitivity ---
+            Text { text: "Timing & Sensitivity"; color: "#fff"; font.pixelSize: 20; font.weight: Font.DemiBold }
+
+            RowLayout {
+                spacing: 12
+                Text { text: "Beat Sensitivity"; color: "#aaa"; font.pixelSize: 14; Layout.preferredWidth: 120 }
+                Slider {
+                    id: sensitivitySlider
+                    Layout.fillWidth: true
+                    from: 0.0; to: 2.0; stepSize: 0.1
+                    value: root.viz ? root.viz.sensitivity : 1.0
+                    onMoved: if (root.viz) root.viz.sensitivity = value
+                }
+                Text { text: sensitivitySlider.value.toFixed(1); color: "#888"; font.pixelSize: 12; Layout.preferredWidth: 30 }
+            }
+
+            RowLayout {
+                spacing: 12
+                Text { text: "Preset Duration"; color: "#aaa"; font.pixelSize: 14; Layout.preferredWidth: 120 }
+                Slider {
+                    id: durationSlider
+                    Layout.fillWidth: true
+                    from: 5; to: 120; stepSize: 5
+                    value: root.viz ? root.viz.presetDuration : 30
+                    onMoved: if (root.viz) root.viz.presetDuration = value
+                }
+                Text { text: Math.round(durationSlider.value) + "s"; color: "#888"; font.pixelSize: 12; Layout.preferredWidth: 36 }
+            }
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: "#333" }
+
             // --- Spectrum Analyzer ---
             Text { text: "Spectrum Analyzer"; color: "#fff"; font.pixelSize: 20; font.weight: Font.DemiBold }
 

@@ -24,6 +24,7 @@ public:
     Q_INVOKABLE void recordMic(int seconds);
     Q_INVOKABLE void playRecording();
     Q_INVOKABLE float channelLevel(int ch);
+    Q_INVOKABLE void testChannel(int ch);
 
 signals:
     void micLevelChanged();
