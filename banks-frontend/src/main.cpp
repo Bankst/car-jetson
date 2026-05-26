@@ -16,6 +16,7 @@
 #include "aa/AASessionController.h"
 #include "aa/AAVideoItem.h"
 #include "aa/AudioTestController.h"
+#include "aa/SystemInfo.h"
 
 int main(int argc, char** argv) {
     // Verbose Qt scene-graph info to stderr by default in dev builds.
@@ -60,6 +61,7 @@ int main(int argc, char** argv) {
     qmlRegisterType<AASessionController>("BanksFrontend", 1, 0, "AASessionController");
     qmlRegisterType<AAVideoItem>("BanksFrontend", 1, 0, "AAVideoItem");
     qmlRegisterType<AudioTestController>("BanksFrontend", 1, 0, "AudioTestController");
+    qmlRegisterType<SystemInfo>("BanksFrontend", 1, 0, "SystemInfo");
 
     QQmlApplicationEngine engine;
     engine.loadFromModule("BanksFrontend", "Main");

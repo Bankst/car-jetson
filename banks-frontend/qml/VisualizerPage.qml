@@ -5,6 +5,7 @@ import BanksFrontend
 
 Item {
     id: root
+    property alias visualizer: viz
 
     Visualizer {
         id: viz

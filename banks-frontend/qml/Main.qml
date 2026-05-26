@@ -12,9 +12,11 @@ ApplicationWindow {
     readonly property int targetH: 1080
     property bool spectrumVisible: true
     property alias aaSession: aaPage.aaSession
-    width:  1920
-    height: 1080
-    minimumWidth: 960; minimumHeight: 540
+    property alias visualizer: vizPage.visualizer
+    property alias spectrumWidget: spectrum
+    width:  Math.round(Screen.desktopAvailableWidth * 0.8)
+    height: Math.round(Screen.desktopAvailableHeight * 0.8)
+    minimumWidth: 640; minimumHeight: 480
     title: "Banks"
 
     color: "#000"
@@ -34,7 +36,7 @@ ApplicationWindow {
         }
 
         HomePage       { onOpenVisualizer: views.currentIndex = 1 }
-        VisualizerPage { /* persistent — projectM lives as long as window */ }
+        VisualizerPage { id: vizPage }
         AndroidAutoPage { id: aaPage }
         Item { /* CAN placeholder */ }
         SettingsPage {}
