@@ -139,7 +139,7 @@ target_compile_options(aasdk-lib PUBLIC -Wno-template-body)
 # openauto-core: cherry-picked service/projection sources (no Qt5 UI)
 FetchContent_Declare(openauto
     GIT_REPOSITORY https://github.com/Bankst/openauto.git
-    GIT_TAG        bankst-dev
+    GIT_TAG        qt6
     GIT_SHALLOW    TRUE
 )
 FetchContent_Populate(openauto)
@@ -172,6 +172,9 @@ set(OPENAUTO_CORE_SOURCES
     ${OA}/Projection/VideoOutput.cpp
     ${OA}/Projection/DummyBluetoothDevice.cpp
     ${OA}/Projection/LocalBluetoothDevice.cpp
+    ${OA}/../btservice/AndroidBluetoothServer.cpp
+    ${OA}/../btservice/AndroidBluetoothService.cpp
+    ${OA}/../btservice/BluetoothHandler.cpp
 )
 if(BANKS_AA_GPS)
     list(APPEND OPENAUTO_CORE_SOURCES ${OA}/Service/Sensor/SensorService.cpp)
@@ -179,14 +182,15 @@ endif()
 
 qt_wrap_cpp(OPENAUTO_MOC_SOURCES
     ${openauto_SOURCE_DIR}/include/f1x/openauto/autoapp/Projection/LocalBluetoothDevice.hpp
+    ${openauto_SOURCE_DIR}/include/f1x/openauto/btservice/AndroidBluetoothServer.hpp
+    ${openauto_SOURCE_DIR}/include/f1x/openauto/btservice/BluetoothHandler.hpp
     TARGET openauto-core
 )
 add_library(openauto-core STATIC ${OPENAUTO_CORE_SOURCES} ${OPENAUTO_MOC_SOURCES})
 target_include_directories(openauto-core
     PUBLIC ${openauto_SOURCE_DIR}/include
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/aa/compat
 )
-target_link_libraries(openauto-core PUBLIC aasdk-lib Qt6::Core Qt6::Network Qt6::Bluetooth)
+target_link_libraries(openauto-core PUBLIC aasdk-lib Qt6::Core Qt6::Gui Qt6::Network Qt6::Bluetooth)
 if(BANKS_AA_GPS)
     target_include_directories(openauto-core PRIVATE ${GPS_INCLUDE_DIR})
     target_link_libraries(openauto-core PRIVATE ${GPS_LIBRARY})

@@ -1,4 +1,0 @@
-// Shim: openauto uses QApplication (Widgets) but we use QGuiApplication.
-// QCoreApplication::instance() works for both.
-#include <QtGui/QGuiApplication>
-#define QApplication QGuiApplication
