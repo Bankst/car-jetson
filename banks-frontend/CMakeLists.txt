@@ -217,6 +217,7 @@ qt_add_executable(banks-frontend
     src/aa/PipeWireAudioOutput.h  src/aa/PipeWireAudioOutput.cpp
     src/aa/PipeWireAudioInput.h   src/aa/PipeWireAudioInput.cpp
     src/aa/AudioTestController.h  src/aa/AudioTestController.cpp
+    src/aa/SystemInfo.h           src/aa/SystemInfo.cpp
 )
 
 # Optional compile-time override for the favorites file location.
@@ -240,6 +241,11 @@ qt_add_qml_module(banks-frontend
         qml/SettingsPage.qml
         qml/SettingsStubPage.qml
         qml/SettingsAudioPage.qml
+        qml/SettingsDisplayPage.qml
+        qml/SettingsVizPage.qml
+        qml/SettingsCanPage.qml
+        qml/SettingsMediaPage.qml
+        qml/SettingsSystemPage.qml
     RESOURCES
         qml/qtquickcontrols2.conf
 )

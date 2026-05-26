@@ -58,11 +58,11 @@ Item {
             currentIndex: sideNav.currentIndex
 
             SettingsAudioPage {}
-            SettingsStubPage { title: "Display" }
-            SettingsStubPage { title: "Visualizer" }
-            SettingsStubPage { title: "CAN Bus" }
-            SettingsStubPage { title: "Media" }
-            SettingsStubPage { title: "System" }
+            SettingsDisplayPage {}
+            SettingsVizPage {}
+            SettingsCanPage {}
+            SettingsMediaPage {}
+            SettingsSystemPage {}
         }
     }
 }
