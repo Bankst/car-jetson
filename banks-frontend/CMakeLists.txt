@@ -16,7 +16,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # --- Qt6 ---
 find_package(Qt6 6.7 REQUIRED COMPONENTS
-    Core Gui Qml Quick QuickControls2 Network
+    Core Gui Qml Quick QuickControls2 Network Bluetooth
 )
 qt_standard_project_setup(REQUIRES 6.7)
 
@@ -171,14 +171,22 @@ set(OPENAUTO_CORE_SOURCES
     ${OA}/App.cpp
     ${OA}/Projection/VideoOutput.cpp
     ${OA}/Projection/DummyBluetoothDevice.cpp
+    ${OA}/Projection/LocalBluetoothDevice.cpp
 )
 if(BANKS_AA_GPS)
     list(APPEND OPENAUTO_CORE_SOURCES ${OA}/Service/Sensor/SensorService.cpp)
 endif()
 
-add_library(openauto-core STATIC ${OPENAUTO_CORE_SOURCES})
-target_include_directories(openauto-core PUBLIC ${openauto_SOURCE_DIR}/include)
-target_link_libraries(openauto-core PUBLIC aasdk-lib Qt6::Core Qt6::Network)
+qt_wrap_cpp(OPENAUTO_MOC_SOURCES
+    ${openauto_SOURCE_DIR}/include/f1x/openauto/autoapp/Projection/LocalBluetoothDevice.hpp
+    TARGET openauto-core
+)
+add_library(openauto-core STATIC ${OPENAUTO_CORE_SOURCES} ${OPENAUTO_MOC_SOURCES})
+target_include_directories(openauto-core
+    PUBLIC ${openauto_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/aa/compat
+)
+target_link_libraries(openauto-core PUBLIC aasdk-lib Qt6::Core Qt6::Network Qt6::Bluetooth)
 if(BANKS_AA_GPS)
     target_include_directories(openauto-core PRIVATE ${GPS_INCLUDE_DIR})
     target_link_libraries(openauto-core PRIVATE ${GPS_LIBRARY})

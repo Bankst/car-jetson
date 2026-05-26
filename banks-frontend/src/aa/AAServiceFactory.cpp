@@ -20,6 +20,7 @@
 #include <f1x/openauto/autoapp/Service/InputSource/InputSourceService.hpp>
 #include <f1x/openauto/autoapp/Service/Sensor/SensorService.hpp>
 #include <f1x/openauto/autoapp/Projection/DummyBluetoothDevice.hpp>
+#include <f1x/openauto/autoapp/Projection/LocalBluetoothDevice.hpp>
 #include <f1x/openauto/autoapp/Service/Bluetooth/BluetoothService.hpp>
 #include <f1x/openauto/Common/Log.hpp>
 
@@ -73,8 +74,26 @@ service::ServiceList AAServiceFactory::create(aasdk::messenger::IMessenger::Poin
     services.emplace_back(
         std::make_shared<service::sensor::SensorService>(m_ioService, messenger));
 
-    // Bluetooth (dummy for now)
-    auto btDevice = std::make_shared<projection::DummyBluetoothDevice>();
+    // Bluetooth — use real adapter if available, else dummy
+    projection::IBluetoothDevice::Pointer btDevice;
+    auto btAddr = m_config->getBluetoothAdapterAddress();
+    if (!btAddr.empty()) {
+        OPENAUTO_LOG(info) << "[AAServiceFactory] using local BT adapter: " << btAddr;
+        btDevice = projection::IBluetoothDevice::Pointer(
+            new projection::LocalBluetoothDevice(QString::fromStdString(btAddr)),
+            [](projection::IBluetoothDevice* p){ static_cast<QObject*>(static_cast<projection::LocalBluetoothDevice*>(p))->deleteLater(); });
+    } else {
+        auto* local = new projection::LocalBluetoothDevice();
+        if (local->isAvailable()) {
+            OPENAUTO_LOG(info) << "[AAServiceFactory] using default BT adapter: " << local->getAdapterAddress();
+            btDevice = projection::IBluetoothDevice::Pointer(local,
+                [](projection::IBluetoothDevice* p){ static_cast<QObject*>(static_cast<projection::LocalBluetoothDevice*>(p))->deleteLater(); });
+        } else {
+            OPENAUTO_LOG(info) << "[AAServiceFactory] no BT adapter, using dummy";
+            delete local;
+            btDevice = std::make_shared<projection::DummyBluetoothDevice>();
+        }
+    }
     services.emplace_back(
         std::make_shared<service::bluetooth::BluetoothService>(m_ioService, messenger, std::move(btDevice)));
 
