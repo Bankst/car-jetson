@@ -17,7 +17,7 @@ PipeWireAudioOutput::PipeWireAudioOutput(uint32_t channels, uint32_t sampleSize,
                                          uint32_t sampleRate, const char* role)
     : m_channels(channels), m_sampleSize(sampleSize), m_sampleRate(sampleRate), m_role(role)
 {
-    m_ringCap = sampleRate * channels * (sampleSize / 8) * 2;
+    m_ringCap = sampleRate * channels * (sampleSize / 8) * 350 / 1000;
     m_ring.resize(m_ringCap);
 }
 
@@ -86,6 +86,10 @@ bool PipeWireAudioOutput::open() {
 void PipeWireAudioOutput::write(aasdk::messenger::Timestamp::ValueType,
                                  const aasdk::common::DataConstBuffer& buffer) {
     if (!m_running) return;
+    if (m_logNextWrite.exchange(false, std::memory_order_relaxed)) {
+        OPENAUTO_LOG(info) << "[PipeWireAudioOutput:" << m_role << "] first write after start, "
+                           << buffer.size << " bytes";
+    }
 
     if (buffer.size >= 2) {
         auto* s16 = reinterpret_cast<const int16_t*>(buffer.cdata);
@@ -103,7 +107,17 @@ void PipeWireAudioOutput::write(aasdk::messenger::Timestamp::ValueType,
 }
 
 void PipeWireAudioOutput::start() {
-    OPENAUTO_LOG(info) << "[PipeWireAudioOutput] start playback";
+    OPENAUTO_LOG(info) << "[PipeWireAudioOutput:" << m_role << "] start — uncork + flush ring";
+    m_logNextWrite.store(true, std::memory_order_relaxed);
+    if (m_loop && m_stream) {
+        pw_thread_loop_lock(m_loop);
+        pw_stream_set_active(m_stream, true);
+        pw_thread_loop_unlock(m_loop);
+    }
+    {
+        std::lock_guard lk(m_ringMtx);
+        m_ringHead = m_ringTail = 0;
+    }
 }
 
 void PipeWireAudioOutput::stop() {
@@ -118,7 +132,12 @@ void PipeWireAudioOutput::stop() {
 }
 
 void PipeWireAudioOutput::suspend() {
-    OPENAUTO_LOG(info) << "[PipeWireAudioOutput] suspend";
+    OPENAUTO_LOG(info) << "[PipeWireAudioOutput:" << m_role << "] suspend — cork";
+    if (m_loop && m_stream) {
+        pw_thread_loop_lock(m_loop);
+        pw_stream_set_active(m_stream, false);
+        pw_thread_loop_unlock(m_loop);
+    }
 }
 
 void PipeWireAudioOutput::onProcess(void* userdata) {

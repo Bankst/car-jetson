@@ -6,6 +6,11 @@ namespace aa {
 
 class AAConfiguration : public f1x::openauto::autoapp::configuration::IConfiguration {
 public:
+    AAConfiguration() = default;
+    AAConfiguration(aap_protobuf::service::media::sink::message::VideoCodecResolutionType res,
+                    aap_protobuf::service::media::sink::message::VideoFrameRateType fps)
+        : m_resolution(res), m_fps(fps) {}
+
     void load() override {}
     void reset() override {}
     void save() override {}
@@ -58,14 +63,14 @@ public:
     QString getParamFromFile(QString, QString) const override { return {}; }
 
     aap_protobuf::service::media::sink::message::VideoFrameRateType getVideoFPS() const override {
-        return aap_protobuf::service::media::sink::message::VideoFrameRateType::VIDEO_FPS_60;
+        return m_fps;
     }
-    void setVideoFPS(aap_protobuf::service::media::sink::message::VideoFrameRateType) override {}
+    void setVideoFPS(aap_protobuf::service::media::sink::message::VideoFrameRateType v) override { m_fps = v; }
 
     aap_protobuf::service::media::sink::message::VideoCodecResolutionType getVideoResolution() const override {
-        return aap_protobuf::service::media::sink::message::VideoCodecResolutionType::VIDEO_1920x1080;
+        return m_resolution;
     }
-    void setVideoResolution(aap_protobuf::service::media::sink::message::VideoCodecResolutionType) override {}
+    void setVideoResolution(aap_protobuf::service::media::sink::message::VideoCodecResolutionType v) override { m_resolution = v; }
 
     size_t getScreenDPI() const override { return 140; }
     void setScreenDPI(size_t) override {}
@@ -107,6 +112,12 @@ public:
         return f1x::openauto::autoapp::configuration::AudioOutputBackendType::QT;
     }
     void setAudioOutputBackendType(f1x::openauto::autoapp::configuration::AudioOutputBackendType) override {}
+
+private:
+    aap_protobuf::service::media::sink::message::VideoCodecResolutionType m_resolution =
+        aap_protobuf::service::media::sink::message::VideoCodecResolutionType::VIDEO_1920x1080;
+    aap_protobuf::service::media::sink::message::VideoFrameRateType m_fps =
+        aap_protobuf::service::media::sink::message::VideoFrameRateType::VIDEO_FPS_60;
 };
 
 }

@@ -55,6 +55,7 @@ private:
     size_t ringRead(uint8_t* dst, size_t len);
 
     std::atomic<float> m_peakLevel{0.0f};
+    std::atomic<bool> m_logNextWrite{false};
 };
 
 }

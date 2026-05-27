@@ -60,6 +60,20 @@ private:
 
 }  // anonymous namespace
 
+namespace {
+std::pair<int,int> resolutionDimensions(int res) {
+    using R = aap_protobuf::service::media::sink::message::VideoCodecResolutionType;
+    switch (static_cast<R>(res)) {
+    case R::VIDEO_800x480:   return {800, 480};
+    case R::VIDEO_1280x720:  return {1280, 720};
+    case R::VIDEO_1920x1080: return {1920, 1080};
+    case R::VIDEO_2560x1440: return {2560, 1440};
+    case R::VIDEO_3840x2160: return {3840, 2160};
+    default:                 return {1920, 1080};
+    }
+}
+}
+
 // ---------------------------------------------------------------------------
 // AASessionController
 // ---------------------------------------------------------------------------
@@ -72,6 +86,9 @@ AASessionController::AASessionController(QObject* parent)
 {
     m_heartbeatTimer.setInterval(kHeartbeatIntervalMs);
     connect(&m_heartbeatTimer, &QTimer::timeout, this, &AASessionController::onHeartbeatTimeout);
+
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
+            this, &AASessionController::stopUSB);
 
     m_micLevelTimer.setInterval(50);
     connect(&m_micLevelTimer, &QTimer::timeout, this, [this]{
@@ -91,6 +108,31 @@ AASessionController::AASessionController(QObject* parent)
             OPENAUTO_LOG(warning) << "[AASessionController] BT pairing agent registration failed";
         }
     });
+
+    QTimer::singleShot(0, this, [this]{
+        if (m_autoStart) activate();
+    });
+}
+
+void AASessionController::setVideoResolution(int v) {
+    if (m_videoResolution != v) {
+        m_videoResolution = v;
+        emit videoResolutionChanged();
+    }
+}
+
+void AASessionController::setVideoFps(int v) {
+    if (m_videoFps != v) {
+        m_videoFps = v;
+        emit videoFpsChanged();
+    }
+}
+
+void AASessionController::setAutoStart(bool v) {
+    if (m_autoStart != v) {
+        m_autoStart = v;
+        emit autoStartChanged();
+    }
 }
 
 float AASessionController::micLevel() const {
@@ -135,6 +177,18 @@ void AASessionController::deactivate() {
     emit sessionActiveChanged();
     setConnected(false);
     setStatus(QStringLiteral("Idle"));
+}
+
+void AASessionController::suspend() {
+    OPENAUTO_LOG(info) << "[AASessionController] suspend() — tearing down for sleep";
+    deactivate();
+    // TODO: additional power-down actions (e.g. disable BT adapter, release USB)
+}
+
+void AASessionController::resume() {
+    OPENAUTO_LOG(info) << "[AASessionController] resume() — waking from sleep";
+    // TODO: re-enable BT adapter, re-probe USB
+    if (m_autoStart) activate();
 }
 
 void AASessionController::setStatus(const QString& s) {
@@ -226,7 +280,12 @@ void AASessionController::startUSB() {
     m_accessoryEnum = std::make_shared<aasdk::usb::ConnectedAccessoriesEnumerator>(
         *m_usbWrapper, *m_ioService, *chainFactory);
 
-    auto config = std::make_shared<aa::AAConfiguration>();
+    auto [vidW, vidH] = resolutionDimensions(m_videoResolution);
+    m_inputDevice->setDisplaySize(vidW, vidH);
+
+    auto config = std::make_shared<aa::AAConfiguration>(
+        static_cast<aap_protobuf::service::media::sink::message::VideoCodecResolutionType>(m_videoResolution),
+        static_cast<aap_protobuf::service::media::sink::message::VideoFrameRateType>(m_videoFps));
     auto serviceFactory = std::make_shared<aa::AAServiceFactory>(
         *m_ioService, config, m_decoder, m_inputDevice, m_micInput);
     m_serviceFactory = serviceFactory;
@@ -283,14 +342,6 @@ void AASessionController::startUSB() {
         auto btService = std::make_shared<f1x::openauto::btservice::AndroidBluetoothService>();
         m_btHandler = std::make_unique<f1x::openauto::btservice::BluetoothHandler>(
             std::move(btService), config);
-
-        // Inject WiFi credentials from command-line args for same-network fallback
-        QVariant ssidVar = QCoreApplication::instance()->property("aaWifiSsid");
-        QVariant pwVar = QCoreApplication::instance()->property("aaWifiPassword");
-        if (ssidVar.isValid() && !ssidVar.toString().isEmpty()) {
-            m_btHandler->setWifiCredentials(ssidVar.toString(), pwVar.toString());
-        }
-
         OPENAUTO_LOG(info) << "[AASessionController] BT wireless AA handler started";
     } catch (const std::exception& e) {
         OPENAUTO_LOG(warning) << "[AASessionController] BT handler failed: " << e.what()

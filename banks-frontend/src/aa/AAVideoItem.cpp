@@ -104,7 +104,20 @@ QSGNode* AAVideoItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
         m_textureId, window(), QSize(frame->width, frame->height));
     node->setTexture(tex);
     node->setOwnsTexture(true);
-    node->setRect(boundingRect());
+
+    QRectF br = boundingRect();
+    float videoAspect = static_cast<float>(frame->width) / frame->height;
+    float itemAspect = br.width() / br.height();
+    QRectF dst;
+    if (itemAspect > videoAspect) {
+        float w = br.height() * videoAspect;
+        dst = QRectF(br.x() + (br.width() - w) / 2, br.y(), w, br.height());
+    } else {
+        float h = br.width() / videoAspect;
+        dst = QRectF(br.x(), br.y() + (br.height() - h) / 2, br.width(), h);
+    }
+    m_videoRect = dst;
+    node->setRect(dst);
     node->setTextureCoordinatesTransform(QSGSimpleTextureNode::NoTransform);
     node->markDirty(QSGNode::DirtyMaterial);
 
@@ -112,22 +125,28 @@ QSGNode* AAVideoItem::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {
 }
 
 void AAVideoItem::mousePressEvent(QMouseEvent* ev) {
-    float nx = static_cast<float>(ev->position().x()) / width();
-    float ny = static_cast<float>(ev->position().y()) / height();
+    float nx = (ev->position().x() - m_videoRect.x()) / m_videoRect.width();
+    float ny = (ev->position().y() - m_videoRect.y()) / m_videoRect.height();
+    nx = qBound(0.0f, nx, 1.0f);
+    ny = qBound(0.0f, ny, 1.0f);
     emit touchDown(nx, ny);
     ev->accept();
 }
 
 void AAVideoItem::mouseMoveEvent(QMouseEvent* ev) {
-    float nx = static_cast<float>(ev->position().x()) / width();
-    float ny = static_cast<float>(ev->position().y()) / height();
+    float nx = (ev->position().x() - m_videoRect.x()) / m_videoRect.width();
+    float ny = (ev->position().y() - m_videoRect.y()) / m_videoRect.height();
+    nx = qBound(0.0f, nx, 1.0f);
+    ny = qBound(0.0f, ny, 1.0f);
     emit touchMove(nx, ny);
     ev->accept();
 }
 
 void AAVideoItem::mouseReleaseEvent(QMouseEvent* ev) {
-    float nx = static_cast<float>(ev->position().x()) / width();
-    float ny = static_cast<float>(ev->position().y()) / height();
+    float nx = (ev->position().x() - m_videoRect.x()) / m_videoRect.width();
+    float ny = (ev->position().y() - m_videoRect.y()) / m_videoRect.height();
+    nx = qBound(0.0f, nx, 1.0f);
+    ny = qBound(0.0f, ny, 1.0f);
     emit touchUp(nx, ny);
     ev->accept();
 }
