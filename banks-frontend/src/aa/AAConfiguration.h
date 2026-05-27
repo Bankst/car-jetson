@@ -96,7 +96,7 @@ public:
     void setBluetoothAdapterType(f1x::openauto::autoapp::configuration::BluetoothAdapterType) override {}
     std::string getBluetoothAdapterAddress() const override { return {}; }
     void setBluetoothAdapterAddress(const std::string&) override {}
-    bool getWirelessProjectionEnabled() const override { return true; }
+    bool getWirelessProjectionEnabled() const override { return false; }
     void setWirelessProjectionEnabled(bool) override {}
 
     bool musicAudioChannelEnabled() const override { return true; }

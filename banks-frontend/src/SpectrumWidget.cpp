@@ -67,11 +67,11 @@ void SpectrumWidget::itemChange(ItemChange change, const ItemChangeData& data) {
             } else {
                 qCWarning(logSpectrum) << "no AudioCapture singleton attached to qApp";
             }
-            if (auto* w = data.window) {
-                connect(w, &QQuickWindow::beforeRendering, this, &SpectrumWidget::onTick,
-                        Qt::DirectConnection);
-            }
+            m_refreshTimer.setInterval(16);
+            connect(&m_refreshTimer, &QTimer::timeout, this, &SpectrumWidget::onTick);
+            m_refreshTimer.start();
         } else {
+            m_refreshTimer.stop();
             if (m_audio && m_ring) m_audio->removeConsumer(m_ring.get());
             m_ring.reset();
             m_fft.reset();
@@ -82,7 +82,7 @@ void SpectrumWidget::itemChange(ItemChange change, const ItemChangeData& data) {
 }
 
 void SpectrumWidget::onTick() {
-    QMetaObject::invokeMethod(this, [this]{ update(); }, Qt::QueuedConnection);
+    if (isVisible()) update();
 }
 
 QSGNode* SpectrumWidget::updatePaintNode(QSGNode* old, UpdatePaintNodeData*) {

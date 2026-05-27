@@ -36,7 +36,7 @@ ApplicationWindow {
         }
 
         HomePage       { onOpenVisualizer: views.currentIndex = 1 }
-        VisualizerPage { id: vizPage }
+        VisualizerPage { id: vizPage; Component.onCompleted: visualizer.active = Qt.binding(function() { return views.currentIndex === 1 && root.active }) }
         AndroidAutoPage { id: aaPage }
         Item { /* CAN placeholder */ }
         SettingsPage {}

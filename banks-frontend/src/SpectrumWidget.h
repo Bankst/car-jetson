@@ -2,6 +2,7 @@
 
 #include <QQuickItem>
 #include <QColor>
+#include <QTimer>
 #include <memory>
 #include <vector>
 
@@ -49,4 +50,5 @@ private:
     std::vector<float>   m_peaks;   // peak-hold values 0..1
     std::vector<float>   m_scratchSamples;
     bool                 m_firstPaintLogged = false;
+    QTimer               m_refreshTimer;
 };

@@ -23,6 +23,7 @@ class Visualizer : public QQuickFramebufferObject {
     Q_PROPERTY(bool locked READ locked WRITE setLocked NOTIFY lockedChanged)
     Q_PROPERTY(float sensitivity READ sensitivity WRITE setSensitivity NOTIFY sensitivityChanged)
     Q_PROPERTY(int presetDuration READ presetDuration WRITE setPresetDuration NOTIFY presetDurationChanged)
+    Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
 
 public:
     explicit Visualizer(QQuickItem* parent = nullptr);
@@ -47,6 +48,8 @@ public:
     void    setSensitivity(float v);
     int     presetDuration() const { return m_presetDuration; }
     void    setPresetDuration(int secs);
+    bool    active() const { return m_active; }
+    void    setActive(bool v) { if (v != m_active) { m_active = v; emit activeChanged(); if (v) update(); } }
 
     Q_INVOKABLE void next();
     Q_INVOKABLE void prev();
@@ -70,6 +73,7 @@ signals:
     void lockedChanged();
     void sensitivityChanged();
     void presetDurationChanged();
+    void activeChanged();
 
 protected:
     void itemChange(ItemChange change, const ItemChangeData& data) override;
@@ -97,4 +101,5 @@ private:
     bool        m_pendingFavoritesOn = false;
     float       m_pendingSensitivity = 1.0f;
     int         m_pendingPresetDuration = 30;
+    bool        m_active = true;
 };

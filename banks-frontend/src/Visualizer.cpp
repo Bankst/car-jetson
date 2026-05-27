@@ -111,7 +111,7 @@ public:
         f->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &qtFbo);
         projectm_opengl_render_frame_fbo(m_pm, static_cast<uint32_t>(qtFbo));
 
-        update();
+        if (m_item && m_item->active()) update();
     }
 
 private:

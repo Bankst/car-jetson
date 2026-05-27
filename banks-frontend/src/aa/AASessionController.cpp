@@ -97,7 +97,7 @@ AASessionController::AASessionController(QObject* parent)
             m_lastMicLevel = lvl;
             emit micLevelChanged();
         }
-        emit audioLevelsChanged();
+        if (m_serviceFactory) emit audioLevelsChanged();
     });
 
     // BlueZ pairing agent — deferred to avoid blocking constructor if
@@ -211,6 +211,12 @@ void AASessionController::setConnected(bool c) {
 // its very first frame.
 void AASessionController::onFirstFrame() {
     OPENAUTO_LOG(info) << "[AASessionController] first video frame received";
+    if (m_btHandler) {
+        OPENAUTO_LOG(info) << "[AASessionController] USB active — shutting down AA BT handler";
+        m_btHandler->shutdownService();
+        m_btHandler.reset();
+        emit wirelessActiveChanged();
+    }
     setConnected(true);
     setStatus(QStringLiteral("Android Auto active"));
 
@@ -232,12 +238,42 @@ void AASessionController::onPhoneDisconnected() {
     m_lastFrameEpochMs.store(0, std::memory_order_relaxed);
 
     setConnected(false);
-    // App::onAndroidAutoQuit already calls waitForDevice(), so the USB
-    // subsystem is still listening for a new phone plug.
     setStatus(QStringLiteral("Disconnected — replug phone"));
 
-    // Reset the decoder so the next connection starts fresh
     m_decoder->close();
+
+}
+
+void AASessionController::startWireless() {
+    if (m_connected) {
+        OPENAUTO_LOG(info) << "[AASessionController] USB active, ignoring wireless start";
+        return;
+    }
+    startBtHandler();
+    emit wirelessActiveChanged();
+}
+
+void AASessionController::stopWireless() {
+    if (m_btHandler) {
+        m_btHandler->shutdownService();
+        m_btHandler.reset();
+        OPENAUTO_LOG(info) << "[AASessionController] wireless AA stopped";
+        emit wirelessActiveChanged();
+    }
+}
+
+void AASessionController::startBtHandler() {
+    if (m_btHandler) return;
+    auto config = std::static_pointer_cast<aa::AAConfiguration>(m_aaConfig);
+    if (!config) return;
+    try {
+        auto btService = std::make_shared<f1x::openauto::btservice::AndroidBluetoothService>();
+        m_btHandler = std::make_unique<f1x::openauto::btservice::BluetoothHandler>(
+            std::move(btService), config);
+        OPENAUTO_LOG(info) << "[AASessionController] BT AA handler started";
+    } catch (const std::exception& e) {
+        OPENAUTO_LOG(warning) << "[AASessionController] BT handler failed: " << e.what();
+    }
 }
 
 // Heartbeat timer fires on the GUI thread every kHeartbeatIntervalMs.
@@ -286,6 +322,7 @@ void AASessionController::startUSB() {
     auto config = std::make_shared<aa::AAConfiguration>(
         static_cast<aap_protobuf::service::media::sink::message::VideoCodecResolutionType>(m_videoResolution),
         static_cast<aap_protobuf::service::media::sink::message::VideoFrameRateType>(m_videoFps));
+    m_aaConfig = config;
     auto serviceFactory = std::make_shared<aa::AAServiceFactory>(
         *m_ioService, config, m_decoder, m_inputDevice, m_micInput);
     m_serviceFactory = serviceFactory;
@@ -337,16 +374,8 @@ void AASessionController::startUSB() {
     setStatus(QStringLiteral("Scanning for devices..."));
     m_app->waitForUSBDevice();
 
-    // Start Bluetooth handler for wireless AA discovery
-    try {
-        auto btService = std::make_shared<f1x::openauto::btservice::AndroidBluetoothService>();
-        m_btHandler = std::make_unique<f1x::openauto::btservice::BluetoothHandler>(
-            std::move(btService), config);
-        OPENAUTO_LOG(info) << "[AASessionController] BT wireless AA handler started";
-    } catch (const std::exception& e) {
-        OPENAUTO_LOG(warning) << "[AASessionController] BT handler failed: " << e.what()
-                              << " (wireless AA unavailable, USB still works)";
-    }
+    // BT wireless AA handler is NOT started here — user must explicitly
+    // request it via the "Start Wireless AA" button on the AA page.
 
     setStatus(QStringLiteral("Waiting for phone..."));
 
@@ -440,6 +469,7 @@ void AASessionController::stopUSB() {
     m_tcpWrapper.reset();
     m_usbWrapper.reset();
     m_ioService.reset();
+    m_aaConfig.reset();
 
     m_decoder->close();
 }
