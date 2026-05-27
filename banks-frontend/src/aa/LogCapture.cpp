@@ -25,12 +25,17 @@ void LogCapture::install()
 
 void LogCapture::messageHandler(QtMsgType type, const QMessageLogContext& ctx, const QString& msg)
 {
-    // Forward to previous handler (stderr output)
+    static thread_local bool inHandler = false;
+    if (inHandler) return;
+    inHandler = true;
+
     if (s_previousHandler)
         s_previousHandler(type, ctx, msg);
 
     if (s_instance)
         s_instance->append(type, msg);
+
+    inHandler = false;
 }
 
 void LogCapture::append(QtMsgType type, const QString& msg)
@@ -57,15 +62,13 @@ void LogCapture::append(QtMsgType type, const QString& msg)
         m_entries.removeFirst();
     lock.unlock();
 
-    // Emit on the main thread if called from a worker
-    if (QThread::currentThread() != thread()) {
-        QMetaObject::invokeMethod(this, [this, line]() {
-            emit newMessage(line);
+    // Throttle UI updates — batch via a coalescing timer instead of
+    // emitting per-message (prevents recursive Qt scene graph logging).
+    if (!m_dirty.exchange(true)) {
+        QMetaObject::invokeMethod(this, [this]() {
+            m_dirty = false;
             emit messagesChanged();
         }, Qt::QueuedConnection);
-    } else {
-        emit newMessage(line);
-        emit messagesChanged();
     }
 }
 

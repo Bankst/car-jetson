@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QStringList>
 #include <QMutex>
+#include <atomic>
 #include <QClipboard>
 #include <QGuiApplication>
 
@@ -51,6 +52,7 @@ private:
     static QtMessageHandler s_previousHandler;
 
     mutable QMutex m_mutex;
+    std::atomic<bool> m_dirty{false};
     QList<Entry> m_entries;
     bool m_autoScroll = true;
     int m_filterLevel = 0;  // 0=all, 1=info+, 2=warn+, 3=error+
