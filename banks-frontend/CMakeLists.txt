@@ -232,6 +232,7 @@ qt_add_executable(banks-frontend
     src/aa/SystemInfo.h           src/aa/SystemInfo.cpp
     src/aa/BluetoothPairingAgent.h src/aa/BluetoothPairingAgent.cpp
     src/aa/BluetoothManager.h      src/aa/BluetoothManager.cpp
+    src/aa/LogCapture.h            src/aa/LogCapture.cpp
 )
 
 # Optional compile-time override for the favorites file location.
@@ -260,6 +261,7 @@ qt_add_qml_module(banks-frontend
         qml/SettingsCanPage.qml
         qml/SettingsMediaPage.qml
         qml/SettingsSystemPage.qml
+        qml/SettingsLogPage.qml
     RESOURCES
         qml/qtquickcontrols2.conf
 )

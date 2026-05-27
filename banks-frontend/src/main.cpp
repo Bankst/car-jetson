@@ -19,6 +19,7 @@
 #include "aa/SystemInfo.h"
 #include "aa/BluetoothPairingAgent.h"
 #include "aa/BluetoothManager.h"
+#include "aa/LogCapture.h"
 
 int main(int argc, char** argv) {
     // Verbose Qt scene-graph info to stderr by default in dev builds.
@@ -27,6 +28,9 @@ int main(int argc, char** argv) {
         "qt.scenegraph.general=true\n"
         "banks.*=true\n"
     );
+
+    // Install log capture early so all messages (including pre-app) are buffered.
+    LogCapture::install();
 
     qInfo("[banks-frontend] starting, pid=%lld", (long long)QCoreApplication::applicationPid());
 
@@ -66,6 +70,7 @@ int main(int argc, char** argv) {
     qmlRegisterType<SystemInfo>("BanksFrontend", 1, 0, "SystemInfo");
     qmlRegisterType<BluetoothPairingAgent>("BanksFrontend", 1, 0, "BluetoothPairingAgent");
     qmlRegisterType<BluetoothManager>("BanksFrontend", 1, 0, "BluetoothManager");
+    qmlRegisterSingletonInstance("BanksFrontend", 1, 0, "LogCapture", LogCapture::instance());
 
     QQmlApplicationEngine engine;
     engine.loadFromModule("BanksFrontend", "Main");
