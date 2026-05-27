@@ -3,6 +3,12 @@
 #include <QMetaObject>
 #include <QThread>
 
+#include <boost/log/trivial.hpp>
+#include <boost/log/sinks/sync_frontend.hpp>
+#include <boost/log/sinks/basic_sink_backend.hpp>
+#include <boost/log/core.hpp>
+#include <boost/log/utility/setup/common_attributes.hpp>
+
 LogCapture* LogCapture::s_instance = nullptr;
 QtMessageHandler LogCapture::s_previousHandler = nullptr;
 
@@ -16,11 +22,39 @@ LogCapture* LogCapture::instance()
     return s_instance;
 }
 
+namespace {
+struct BoostToQtSink : public boost::log::sinks::basic_sink_backend<
+    boost::log::sinks::synchronized_feeding> {
+    void consume(const boost::log::record_view& rec) {
+        auto msg = rec[boost::log::expressions::smessage];
+        if (!msg) return;
+        auto sev = rec[boost::log::trivial::severity];
+        QtMsgType type = QtDebugMsg;
+        if (sev) {
+            switch (sev.get()) {
+            case boost::log::trivial::warning: type = QtWarningMsg; break;
+            case boost::log::trivial::error:
+            case boost::log::trivial::fatal: type = QtCriticalMsg; break;
+            case boost::log::trivial::info: type = QtInfoMsg; break;
+            default: type = QtDebugMsg; break;
+            }
+        }
+        if (LogCapture::instance())
+            LogCapture::instance()->append(type, QString::fromStdString(msg.get()));
+    }
+};
+}
+
 void LogCapture::install()
 {
     if (!s_instance)
         s_instance = new LogCapture();
     s_previousHandler = qInstallMessageHandler(messageHandler);
+
+    // Bridge boost::log into our capture buffer
+    auto sink = boost::make_shared<boost::log::sinks::synchronous_sink<BoostToQtSink>>(
+        boost::make_shared<BoostToQtSink>());
+    boost::log::core::get()->add_sink(sink);
 }
 
 void LogCapture::messageHandler(QtMsgType type, const QMessageLogContext& ctx, const QString& msg)

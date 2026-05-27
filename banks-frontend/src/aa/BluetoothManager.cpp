@@ -125,44 +125,18 @@ void BluetoothManager::refreshDevices() {
     }
 
     QVariantList newDevices;
-    const QDBusArgument arg = reply.arguments().at(0).value<QDBusArgument>();
-    arg.beginMap();
-    while (!arg.atEnd()) {
-        QDBusObjectPath path;
-        QMap<QString, QVariantMap> ifaces;
 
-        arg.beginMapEntry();
-        arg >> path;
+    // GetManagedObjects returns a{oa{sa{sv}}}. Use QDBusObjectPath-keyed map.
+    // Let Qt handle the complex deserialization by converting the whole reply
+    // to a variant map hierarchy.
+    using ManagedObjects = QMap<QDBusObjectPath, QMap<QString, QVariantMap>>;
+    ManagedObjects objects;
+    reply.arguments().at(0).value<QDBusArgument>() >> objects;
 
-        // Manually deserialize the nested dict<string, dict<string, variant>>
-        QDBusArgument ifaceArg = arg.asVariant().value<QDBusArgument>();
-        ifaceArg.beginMap();
-        while (!ifaceArg.atEnd()) {
-            QString ifaceName;
-            QVariantMap props;
-            ifaceArg.beginMapEntry();
-            ifaceArg >> ifaceName;
+    for (auto it = objects.constBegin(); it != objects.constEnd(); ++it) {
+        const QString path = it.key().path();
+        const auto& ifaces = it.value();
 
-            QDBusArgument propsArg = ifaceArg.asVariant().value<QDBusArgument>();
-            propsArg.beginMap();
-            while (!propsArg.atEnd()) {
-                QString propName;
-                QDBusVariant propVal;
-                propsArg.beginMapEntry();
-                propsArg >> propName >> propVal;
-                propsArg.endMapEntry();
-                props.insert(propName, propVal.variant());
-            }
-            propsArg.endMap();
-
-            ifaceArg.endMapEntry();
-            ifaces.insert(ifaceName, props);
-        }
-        ifaceArg.endMap();
-
-        arg.endMapEntry();
-
-        // Only care about objects that have org.bluez.Device1
         if (!ifaces.contains(QLatin1String(kDeviceIface))) continue;
 
         const QVariantMap& devProps = ifaces.value(QLatin1String(kDeviceIface));
@@ -177,10 +151,9 @@ void BluetoothManager::refreshDevices() {
         entry[QStringLiteral("mac")] = mac;
         entry[QStringLiteral("paired")] = paired;
         entry[QStringLiteral("connected")] = connected;
-        entry[QStringLiteral("path")] = path.path();
+        entry[QStringLiteral("path")] = path;
         newDevices.append(entry);
     }
-    arg.endMap();
 
     if (newDevices != m_devices) {
         m_devices = newDevices;

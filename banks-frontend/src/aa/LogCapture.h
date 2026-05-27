@@ -37,6 +37,9 @@ signals:
     void filterLevelChanged();
     void newMessage(const QString& msg);
 
+public:
+    void append(QtMsgType type, const QString& msg);
+
 private:
     struct Entry {
         int level;       // 0=debug, 1=info, 2=warning, 3=critical/fatal
@@ -45,7 +48,6 @@ private:
 
     static void messageHandler(QtMsgType type, const QMessageLogContext& ctx, const QString& msg);
 
-    void append(QtMsgType type, const QString& msg);
     QStringList filtered() const;
 
     static LogCapture* s_instance;
