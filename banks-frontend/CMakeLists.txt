@@ -16,7 +16,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # --- Qt6 ---
 find_package(Qt6 6.7 REQUIRED COMPONENTS
-    Core Gui Qml Quick QuickControls2 Network Bluetooth
+    Core Gui Qml Quick QuickControls2 Network Bluetooth DBus
 )
 qt_standard_project_setup(REQUIRES 6.7)
 
@@ -230,6 +230,7 @@ qt_add_executable(banks-frontend
     src/aa/PipeWireAudioInput.h   src/aa/PipeWireAudioInput.cpp
     src/aa/AudioTestController.h  src/aa/AudioTestController.cpp
     src/aa/SystemInfo.h           src/aa/SystemInfo.cpp
+    src/aa/BluetoothPairingAgent.h src/aa/BluetoothPairingAgent.cpp
 )
 
 # Optional compile-time override for the favorites file location.
@@ -267,7 +268,7 @@ target_compile_definitions(banks-frontend PRIVATE
 )
 
 target_link_libraries(banks-frontend PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus
     imgui
     libprojectM::projectM
     libprojectM::playlist

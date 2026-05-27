@@ -5,6 +5,7 @@
 #include "QmlInputDevice.h"
 #include "PipeWireAudioInput.h"
 #include "PipeWireAudioOutput.h"
+#include "BluetoothPairingAgent.h"
 
 #include <boost/asio.hpp>
 #include <libusb-1.0/libusb.h>
@@ -79,6 +80,15 @@ AASessionController::AASessionController(QObject* parent)
             emit micLevelChanged();
         }
         emit audioLevelsChanged();
+    });
+
+    // BlueZ pairing agent — deferred to avoid blocking constructor if
+    // D-Bus call hangs (e.g. GNOME BT agent holds the default slot).
+    m_pairingAgent = new BluetoothPairingAgent(this);
+    QTimer::singleShot(500, this, [this]{
+        if (!m_pairingAgent->registerAgent()) {
+            OPENAUTO_LOG(warning) << "[AASessionController] BT pairing agent registration failed";
+        }
     });
 }
 

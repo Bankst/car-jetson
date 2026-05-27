@@ -144,6 +144,187 @@ Item {
         }
     }
 
+    // -- Bluetooth pairing confirmation dialog --
+    Rectangle {
+        id: pairingOverlay
+        anchors.fill: parent
+        color: "#a0000000"
+        visible: aaSession.pairingAgent && aaSession.pairingAgent.pairingPending
+        z: 9999
+
+        // Block mouse events from reaching controls underneath
+        MouseArea { anchors.fill: parent }
+
+        Rectangle {
+            id: pairingDialog
+            anchors.centerIn: parent
+            width: 440
+            height: dialogColumn.height + 48
+            radius: 16
+            color: "#1e1e24"
+            border.color: "#303040"
+            border.width: 1
+
+            Column {
+                id: dialogColumn
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.top: parent.top
+                anchors.topMargin: 24
+                width: parent.width - 48
+                spacing: 16
+
+                Text {
+                    text: "Bluetooth Pairing"
+                    color: "#ffffff"
+                    font.pixelSize: 22
+                    font.weight: Font.DemiBold
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+
+                Text {
+                    text: aaSession.pairingAgent
+                          ? "Pair with " + aaSession.pairingAgent.deviceName + "?"
+                          : ""
+                    color: "#bbbbbb"
+                    font.pixelSize: 16
+                    wrapMode: Text.WordWrap
+                    width: parent.width
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Text {
+                    text: "Confirm the PIN matches on both devices:"
+                    color: "#888888"
+                    font.pixelSize: 13
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+
+                // Large PIN display
+                Rectangle {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: pinText.width + 48
+                    height: pinText.height + 20
+                    radius: 8
+                    color: "#282830"
+
+                    Text {
+                        id: pinText
+                        anchors.centerIn: parent
+                        text: aaSession.pairingAgent ? aaSession.pairingAgent.passkey : ""
+                        color: "#55aaff"
+                        font.pixelSize: 42
+                        font.weight: Font.Bold
+                        font.family: "monospace"
+                        font.letterSpacing: 8
+                    }
+                }
+
+                // Timeout progress bar
+                Item {
+                    width: parent.width
+                    height: 4
+
+                    Rectangle {
+                        width: parent.width
+                        height: parent.height
+                        radius: 2
+                        color: "#202028"
+                    }
+
+                    Rectangle {
+                        id: timeoutBar
+                        height: parent.height
+                        radius: 2
+                        color: "#55aaff"
+                        width: parent.width
+
+                        NumberAnimation on width {
+                            id: timeoutAnim
+                            to: 0
+                            duration: 30000
+                            running: false
+                        }
+                    }
+                }
+
+                // Buttons
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 16
+
+                    Rectangle {
+                        width: 140; height: 44
+                        radius: 8
+                        color: rejectMa.pressed ? "#553333" : "#402828"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Reject"
+                            color: "#cc6666"
+                            font.pixelSize: 16
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            id: rejectMa
+                            anchors.fill: parent
+                            onClicked: {
+                                if (aaSession.pairingAgent)
+                                    aaSession.pairingAgent.confirmPairing(false)
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 140; height: 44
+                        radius: 8
+                        color: acceptMa.pressed ? "#335533" : "#284028"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "Confirm"
+                            color: "#66cc66"
+                            font.pixelSize: 16
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            id: acceptMa
+                            anchors.fill: parent
+                            onClicked: {
+                                if (aaSession.pairingAgent)
+                                    aaSession.pairingAgent.confirmPairing(true)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Auto-reject on timeout
+        Timer {
+            id: pairingTimeout
+            interval: 30000
+            running: false
+            onTriggered: {
+                if (aaSession.pairingAgent && aaSession.pairingAgent.pairingPending)
+                    aaSession.pairingAgent.confirmPairing(false)
+            }
+        }
+
+        // Start/stop timeout when dialog shows/hides
+        onVisibleChanged: {
+            if (visible) {
+                timeoutBar.width = Qt.binding(function() { return timeoutBar.parent.width })
+                timeoutAnim.restart()
+                pairingTimeout.restart()
+            } else {
+                timeoutAnim.stop()
+                pairingTimeout.stop()
+            }
+        }
+    }
+
     function onTabActivated()  { aaSession.activate()   }
     function onTabDeactivated(){ aaSession.deactivate()  }
 }

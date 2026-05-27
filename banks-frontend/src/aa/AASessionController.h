@@ -11,6 +11,10 @@
 
 class AAVideoDecoder;
 
+// Full include needed — Q_PROPERTY(BluetoothPairingAgent*) requires a
+// complete type for Qt6 MOC metatype registration.
+#include "BluetoothPairingAgent.h"
+
 namespace aa { class QmlInputDevice; class PipeWireAudioInput; }
 
 namespace aasdk::usb { class USBWrapper; class IUSBHub; class IConnectedAccessoriesEnumerator; }
@@ -28,6 +32,7 @@ class AASessionController : public QObject {
     Q_PROPERTY(float musicLevel READ musicLevel NOTIFY audioLevelsChanged)
     Q_PROPERTY(float guidanceLevel READ guidanceLevel NOTIFY audioLevelsChanged)
     Q_PROPERTY(float systemLevel READ systemLevel NOTIFY audioLevelsChanged)
+    Q_PROPERTY(BluetoothPairingAgent* pairingAgent READ pairingAgent CONSTANT)
 
 public:
     explicit AASessionController(QObject* parent = nullptr);
@@ -46,6 +51,7 @@ public:
 
     std::shared_ptr<AAVideoDecoder> decoder() const { return m_decoder; }
     std::shared_ptr<aa::QmlInputDevice> inputDevice() const { return m_inputDevice; }
+    BluetoothPairingAgent* pairingAgent() const { return m_pairingAgent; }
 
 signals:
     void connectedChanged();
@@ -92,6 +98,7 @@ private:
     std::unique_ptr<f1x::openauto::autoapp::service::IAndroidAutoEntityFactory> m_entityFactory;
     std::shared_ptr<f1x::openauto::autoapp::App> m_app;
     std::unique_ptr<f1x::openauto::btservice::BluetoothHandler> m_btHandler;
+    BluetoothPairingAgent* m_pairingAgent = nullptr;
 
     std::vector<std::thread> m_ioThreads;
     std::vector<std::thread> m_usbThreads;
