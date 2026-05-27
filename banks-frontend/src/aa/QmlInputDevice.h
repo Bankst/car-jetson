@@ -16,6 +16,7 @@ public:
     bool hasTouchscreen() const override;
     QRect getTouchscreenGeometry() const override;
 
+    void setDisplaySize(int w, int h);
     void injectTouchDown(float normX, float normY);
     void injectTouchMove(float normX, float normY);
     void injectTouchUp(float normX, float normY);

@@ -32,6 +32,12 @@ QmlInputDevice::ButtonCodes QmlInputDevice::getSupportedButtonCodes() const {
     };
 }
 
+void QmlInputDevice::setDisplaySize(int w, int h) {
+    std::lock_guard lk(m_mtx);
+    m_displayW = w;
+    m_displayH = h;
+}
+
 bool QmlInputDevice::hasTouchscreen() const { return true; }
 
 QRect QmlInputDevice::getTouchscreenGeometry() const {

@@ -47,4 +47,5 @@ private:
     bool m_hasFrame = false;
     int m_lastW = 0;
     int m_lastH = 0;
+    QRectF m_videoRect;
 };

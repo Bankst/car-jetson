@@ -116,6 +116,127 @@ Item {
 
             Rectangle { Layout.fillWidth: true; height: 1; color: "#333" }
 
+            // --- Android Auto Video ---
+            Text { text: "Android Auto Video"; color: "#fff"; font.pixelSize: 20; font.weight: Font.DemiBold }
+
+            RowLayout {
+                spacing: 12
+                Text { text: "Auto-start"; color: "#aaa"; font.pixelSize: 14; Layout.preferredWidth: 120 }
+                Switch {
+                    id: aaAutoStartToggle
+                    checked: {
+                        var s = Window.window ? Window.window.aaSession : null
+                        return s ? s.autoStart : true
+                    }
+                    onToggled: {
+                        var s = Window.window ? Window.window.aaSession : null
+                        if (s) s.autoStart = checked
+                    }
+                }
+                Text { text: "Start AA session on app launch"; color: "#555"; font.pixelSize: 11 }
+            }
+
+            Text {
+                text: "Resolution/FPS changes take effect on next session"
+                color: "#555"; font.pixelSize: 11
+            }
+
+            GridLayout {
+                columns: 2; columnSpacing: 24; rowSpacing: 12; Layout.fillWidth: true
+
+                Text { text: "Resolution"; color: "#aaa"; font.pixelSize: 14 }
+                ComboBox {
+                    id: aaResCombo
+                    Layout.preferredWidth: 200
+                    model: ListModel {
+                        ListElement { text: "800 x 480";   value: 1 }
+                        ListElement { text: "1280 x 720";  value: 2 }
+                        ListElement { text: "1920 x 1080"; value: 3 }
+                    }
+                    textRole: "text"
+                    currentIndex: {
+                        var s = Window.window ? Window.window.aaSession : null
+                        if (!s) return 2
+                        var v = s.videoResolution
+                        if (v === 1) return 0
+                        if (v === 2) return 1
+                        return 2
+                    }
+                    onActivated: function(index) {
+                        var s = Window.window ? Window.window.aaSession : null
+                        if (s) s.videoResolution = model.get(index).value
+                    }
+
+                    background: Rectangle { color: "#2a2a30"; radius: 6; border.color: "#444"; border.width: 1 }
+                    contentItem: Text {
+                        text: aaResCombo.displayText; color: "#ccc"; font.pixelSize: 14
+                        leftPadding: 8; verticalAlignment: Text.AlignVCenter
+                    }
+                    popup: Popup {
+                        y: aaResCombo.height
+                        width: aaResCombo.width
+                        padding: 1
+                        contentItem: ListView {
+                            implicitHeight: contentHeight
+                            model: aaResCombo.delegateModel
+                            clip: true
+                        }
+                        background: Rectangle { color: "#2a2a30"; border.color: "#555"; radius: 4 }
+                    }
+                    delegate: ItemDelegate {
+                        width: aaResCombo.width
+                        contentItem: Text { text: model.text; color: "#ccc"; font.pixelSize: 14; leftPadding: 8 }
+                        background: Rectangle { color: highlighted ? "#3a3a40" : "transparent" }
+                        highlighted: aaResCombo.highlightedIndex === index
+                    }
+                }
+
+                Text { text: "Frame Rate"; color: "#aaa"; font.pixelSize: 14 }
+                ComboBox {
+                    id: aaFpsCombo
+                    Layout.preferredWidth: 200
+                    model: ListModel {
+                        ListElement { text: "60 fps"; value: 1 }
+                        ListElement { text: "30 fps"; value: 2 }
+                    }
+                    textRole: "text"
+                    currentIndex: {
+                        var s = Window.window ? Window.window.aaSession : null
+                        if (!s) return 0
+                        return s.videoFps === 2 ? 1 : 0
+                    }
+                    onActivated: function(index) {
+                        var s = Window.window ? Window.window.aaSession : null
+                        if (s) s.videoFps = model.get(index).value
+                    }
+
+                    background: Rectangle { color: "#2a2a30"; radius: 6; border.color: "#444"; border.width: 1 }
+                    contentItem: Text {
+                        text: aaFpsCombo.displayText; color: "#ccc"; font.pixelSize: 14
+                        leftPadding: 8; verticalAlignment: Text.AlignVCenter
+                    }
+                    popup: Popup {
+                        y: aaFpsCombo.height
+                        width: aaFpsCombo.width
+                        padding: 1
+                        contentItem: ListView {
+                            implicitHeight: contentHeight
+                            model: aaFpsCombo.delegateModel
+                            clip: true
+                        }
+                        background: Rectangle { color: "#2a2a30"; border.color: "#555"; radius: 4 }
+                    }
+                    delegate: ItemDelegate {
+                        width: aaFpsCombo.width
+                        contentItem: Text { text: model.text; color: "#ccc"; font.pixelSize: 14; leftPadding: 8 }
+                        background: Rectangle { color: highlighted ? "#3a3a40" : "transparent" }
+                        highlighted: aaFpsCombo.highlightedIndex === index
+                    }
+                }
+            }
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: "#333" }
+
             // --- Rendering ---
             Text { text: "Rendering"; color: "#fff"; font.pixelSize: 20; font.weight: Font.DemiBold }
 

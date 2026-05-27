@@ -33,6 +33,9 @@ class AASessionController : public QObject {
     Q_PROPERTY(float guidanceLevel READ guidanceLevel NOTIFY audioLevelsChanged)
     Q_PROPERTY(float systemLevel READ systemLevel NOTIFY audioLevelsChanged)
     Q_PROPERTY(BluetoothPairingAgent* pairingAgent READ pairingAgent CONSTANT)
+    Q_PROPERTY(int videoResolution READ videoResolution WRITE setVideoResolution NOTIFY videoResolutionChanged)
+    Q_PROPERTY(int videoFps READ videoFps WRITE setVideoFps NOTIFY videoFpsChanged)
+    Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY autoStartChanged)
 
 public:
     explicit AASessionController(QObject* parent = nullptr);
@@ -46,8 +49,17 @@ public:
     float guidanceLevel() const;
     float systemLevel() const;
 
+    int videoResolution() const { return m_videoResolution; }
+    void setVideoResolution(int v);
+    int videoFps() const { return m_videoFps; }
+    void setVideoFps(int v);
+    bool autoStart() const { return m_autoStart; }
+    void setAutoStart(bool v);
+
     Q_INVOKABLE void activate();
     Q_INVOKABLE void deactivate();
+    Q_INVOKABLE void suspend();
+    Q_INVOKABLE void resume();
 
     std::shared_ptr<AAVideoDecoder> decoder() const { return m_decoder; }
     std::shared_ptr<aa::QmlInputDevice> inputDevice() const { return m_inputDevice; }
@@ -59,6 +71,9 @@ signals:
     void statusChanged();
     void micLevelChanged();
     void audioLevelsChanged();
+    void videoResolutionChanged();
+    void videoFpsChanged();
+    void autoStartChanged();
 
 private:
     void startUSB();
@@ -103,4 +118,8 @@ private:
     std::vector<std::thread> m_ioThreads;
     std::vector<std::thread> m_usbThreads;
 
+    // 3 = VIDEO_1920x1080, 1 = VIDEO_FPS_60 (protobuf enum values)
+    int m_videoResolution = 3;
+    int m_videoFps = 1;
+    bool m_autoStart = true;
 };
