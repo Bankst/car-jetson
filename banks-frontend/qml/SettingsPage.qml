@@ -27,6 +27,7 @@ Item {
                     ListElement { label: "CAN";     page: 3 }
                     ListElement { label: "Media";   page: 4 }
                     ListElement { label: "System";  page: 5 }
+                    ListElement { label: "Log";     page: 6 }
                 }
                 delegate: ItemDelegate {
                     width: sideNav.width
@@ -63,6 +64,7 @@ Item {
             SettingsCanPage {}
             SettingsMediaPage {}
             SettingsSystemPage {}
+            SettingsLogPage {}
         }
     }
 }
