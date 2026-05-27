@@ -21,6 +21,7 @@
 #include "aa/BluetoothManager.h"
 #include "aa/LogCapture.h"
 
+#include <QCommandLineParser>
 #include <QLockFile>
 #include <QStandardPaths>
 
@@ -60,7 +61,21 @@ int main(int argc, char** argv) {
     qInfo("[banks-frontend] RHI backend pinned: OpenGL");
 
     QGuiApplication app(argc, argv);
+    app.setApplicationVersion(QStringLiteral("0.1.0"));
     QQuickStyle::setStyle("Basic");
+
+    QCommandLineParser parser;
+    parser.setApplicationDescription("Banks infotainment frontend");
+    parser.addHelpOption();
+    parser.addVersionOption();
+    parser.addOption(QCommandLineOption("wifi-ssid", "WiFi SSID for wireless AA same-network fallback", "ssid"));
+    parser.addOption(QCommandLineOption("wifi-password", "WiFi password for wireless AA same-network fallback", "password"));
+    parser.process(app);
+
+    if (parser.isSet("wifi-ssid"))
+        app.setProperty("aaWifiSsid", parser.value("wifi-ssid"));
+    if (parser.isSet("wifi-password"))
+        app.setProperty("aaWifiPassword", parser.value("wifi-password"));
 
     // Process-wide audio capture singleton. Lives for full app lifetime so
     // both Visualizer and SpectrumWidget can borrow it as they enter/leave

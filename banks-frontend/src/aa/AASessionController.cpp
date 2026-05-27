@@ -23,6 +23,7 @@
 #include <f1x/openauto/btservice/AndroidBluetoothService.hpp>
 #include <f1x/openauto/Common/Log.hpp>
 
+#include <QCoreApplication>
 #include <QDebug>
 
 // ---------------------------------------------------------------------------
@@ -282,6 +283,14 @@ void AASessionController::startUSB() {
         auto btService = std::make_shared<f1x::openauto::btservice::AndroidBluetoothService>();
         m_btHandler = std::make_unique<f1x::openauto::btservice::BluetoothHandler>(
             std::move(btService), config);
+
+        // Inject WiFi credentials from command-line args for same-network fallback
+        QVariant ssidVar = QCoreApplication::instance()->property("aaWifiSsid");
+        QVariant pwVar = QCoreApplication::instance()->property("aaWifiPassword");
+        if (ssidVar.isValid() && !ssidVar.toString().isEmpty()) {
+            m_btHandler->setWifiCredentials(ssidVar.toString(), pwVar.toString());
+        }
+
         OPENAUTO_LOG(info) << "[AASessionController] BT wireless AA handler started";
     } catch (const std::exception& e) {
         OPENAUTO_LOG(warning) << "[AASessionController] BT handler failed: " << e.what()
