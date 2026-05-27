@@ -18,6 +18,7 @@
 #include "aa/AudioTestController.h"
 #include "aa/SystemInfo.h"
 #include "aa/BluetoothPairingAgent.h"
+#include "aa/BluetoothManager.h"
 
 int main(int argc, char** argv) {
     // Verbose Qt scene-graph info to stderr by default in dev builds.
@@ -64,6 +65,7 @@ int main(int argc, char** argv) {
     qmlRegisterType<AudioTestController>("BanksFrontend", 1, 0, "AudioTestController");
     qmlRegisterType<SystemInfo>("BanksFrontend", 1, 0, "SystemInfo");
     qmlRegisterType<BluetoothPairingAgent>("BanksFrontend", 1, 0, "BluetoothPairingAgent");
+    qmlRegisterType<BluetoothManager>("BanksFrontend", 1, 0, "BluetoothManager");
 
     QQmlApplicationEngine engine;
     engine.loadFromModule("BanksFrontend", "Main");

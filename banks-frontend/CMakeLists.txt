@@ -231,6 +231,7 @@ qt_add_executable(banks-frontend
     src/aa/AudioTestController.h  src/aa/AudioTestController.cpp
     src/aa/SystemInfo.h           src/aa/SystemInfo.cpp
     src/aa/BluetoothPairingAgent.h src/aa/BluetoothPairingAgent.cpp
+    src/aa/BluetoothManager.h      src/aa/BluetoothManager.cpp
 )
 
 # Optional compile-time override for the favorites file location.
