@@ -86,10 +86,6 @@ bool PipeWireAudioOutput::open() {
 void PipeWireAudioOutput::write(aasdk::messenger::Timestamp::ValueType,
                                  const aasdk::common::DataConstBuffer& buffer) {
     if (!m_running) return;
-    if (m_logNextWrite.exchange(false, std::memory_order_relaxed)) {
-        OPENAUTO_LOG(info) << "[PipeWireAudioOutput:" << m_role << "] first write after start, "
-                           << buffer.size << " bytes";
-    }
 
     if (buffer.size >= 2) {
         auto* s16 = reinterpret_cast<const int16_t*>(buffer.cdata);
@@ -107,8 +103,7 @@ void PipeWireAudioOutput::write(aasdk::messenger::Timestamp::ValueType,
 }
 
 void PipeWireAudioOutput::start() {
-    OPENAUTO_LOG(info) << "[PipeWireAudioOutput:" << m_role << "] start — uncork + flush ring";
-    m_logNextWrite.store(true, std::memory_order_relaxed);
+    OPENAUTO_LOG(info) << "[PipeWireAudioOutput:" << m_role << "] start";
     if (m_loop && m_stream) {
         pw_thread_loop_lock(m_loop);
         pw_stream_set_active(m_stream, true);
@@ -132,7 +127,7 @@ void PipeWireAudioOutput::stop() {
 }
 
 void PipeWireAudioOutput::suspend() {
-    OPENAUTO_LOG(info) << "[PipeWireAudioOutput:" << m_role << "] suspend — cork";
+    OPENAUTO_LOG(info) << "[PipeWireAudioOutput:" << m_role << "] suspend";
     if (m_loop && m_stream) {
         pw_thread_loop_lock(m_loop);
         pw_stream_set_active(m_stream, false);
