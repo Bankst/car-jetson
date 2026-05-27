@@ -178,19 +178,19 @@ void PipeWireAudioOutput::ringWrite(const uint8_t* data, size_t len) {
     if (len > ringFree()) {
         m_ringTail = (m_ringTail + len - ringFree()) % m_ringCap;
     }
-    for (size_t i = 0; i < len; ++i) {
-        m_ring[m_ringHead] = data[i];
-        m_ringHead = (m_ringHead + 1) % m_ringCap;
-    }
+    size_t first = std::min(len, m_ringCap - m_ringHead);
+    std::memcpy(m_ring.data() + m_ringHead, data, first);
+    if (first < len) std::memcpy(m_ring.data(), data + first, len - first);
+    m_ringHead = (m_ringHead + len) % m_ringCap;
 }
 
 size_t PipeWireAudioOutput::ringRead(uint8_t* dst, size_t len) {
     size_t avail = ringUsed();
     size_t toRead = std::min(len, avail);
-    for (size_t i = 0; i < toRead; ++i) {
-        dst[i] = m_ring[m_ringTail];
-        m_ringTail = (m_ringTail + 1) % m_ringCap;
-    }
+    size_t first = std::min(toRead, m_ringCap - m_ringTail);
+    std::memcpy(dst, m_ring.data() + m_ringTail, first);
+    if (first < toRead) std::memcpy(dst + first, m_ring.data(), toRead - first);
+    m_ringTail = (m_ringTail + toRead) % m_ringCap;
     return toRead;
 }
 

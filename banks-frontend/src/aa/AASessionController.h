@@ -36,6 +36,7 @@ class AASessionController : public QObject {
     Q_PROPERTY(int videoResolution READ videoResolution WRITE setVideoResolution NOTIFY videoResolutionChanged)
     Q_PROPERTY(int videoFps READ videoFps WRITE setVideoFps NOTIFY videoFpsChanged)
     Q_PROPERTY(bool autoStart READ autoStart WRITE setAutoStart NOTIFY autoStartChanged)
+    Q_PROPERTY(bool wirelessActive READ wirelessActive NOTIFY wirelessActiveChanged)
 
 public:
     explicit AASessionController(QObject* parent = nullptr);
@@ -55,11 +56,14 @@ public:
     void setVideoFps(int v);
     bool autoStart() const { return m_autoStart; }
     void setAutoStart(bool v);
+    bool wirelessActive() const { return m_btHandler != nullptr; }
 
     Q_INVOKABLE void activate();
     Q_INVOKABLE void deactivate();
     Q_INVOKABLE void suspend();
     Q_INVOKABLE void resume();
+    Q_INVOKABLE void startWireless();
+    Q_INVOKABLE void stopWireless();
 
     std::shared_ptr<AAVideoDecoder> decoder() const { return m_decoder; }
     std::shared_ptr<aa::QmlInputDevice> inputDevice() const { return m_inputDevice; }
@@ -74,10 +78,12 @@ signals:
     void videoResolutionChanged();
     void videoFpsChanged();
     void autoStartChanged();
+    void wirelessActiveChanged();
 
 private:
     void startUSB();
     void stopUSB();
+    void startBtHandler();
     void setStatus(const QString& s);
     void setConnected(bool c);
     void onFirstFrame();
@@ -113,6 +119,7 @@ private:
     std::unique_ptr<f1x::openauto::autoapp::service::IAndroidAutoEntityFactory> m_entityFactory;
     std::shared_ptr<f1x::openauto::autoapp::App> m_app;
     std::unique_ptr<f1x::openauto::btservice::BluetoothHandler> m_btHandler;
+    std::shared_ptr<void> m_aaConfig;
     BluetoothPairingAgent* m_pairingAgent = nullptr;
 
     std::vector<std::thread> m_ioThreads;

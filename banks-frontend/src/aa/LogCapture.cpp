@@ -2,6 +2,7 @@
 #include <QDateTime>
 #include <QMetaObject>
 #include <QThread>
+#include <QTimer>
 
 #include <boost/log/trivial.hpp>
 #include <boost/log/sinks/sync_frontend.hpp>
@@ -96,12 +97,12 @@ void LogCapture::append(QtMsgType type, const QString& msg)
         m_entries.removeFirst();
     lock.unlock();
 
-    // Throttle UI updates — batch via a coalescing timer instead of
-    // emitting per-message (prevents recursive Qt scene graph logging).
     if (!m_dirty.exchange(true)) {
         QMetaObject::invokeMethod(this, [this]() {
-            m_dirty = false;
-            emit messagesChanged();
+            QTimer::singleShot(250, this, [this]() {
+                m_dirty = false;
+                emit messagesChanged();
+            });
         }, Qt::QueuedConnection);
     }
 }

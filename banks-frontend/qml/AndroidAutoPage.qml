@@ -63,6 +63,36 @@ Item {
                 font.pixelSize: 16
                 anchors.horizontalCenter: parent.horizontalCenter
             }
+
+            Rectangle {
+                visible: !aaSession.connected
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: wirelessLabel.width + 32
+                height: wirelessLabel.height + 16
+                radius: 8
+                color: wirelessMa.pressed ? "#334433" : (aaSession.wirelessActive ? "#283828" : "#282830")
+                border.color: aaSession.wirelessActive ? "#44cc44" : "#444"
+                border.width: 1
+
+                Text {
+                    id: wirelessLabel
+                    anchors.centerIn: parent
+                    text: aaSession.wirelessActive ? "Wireless AA Active" : "Start Wireless AA"
+                    color: aaSession.wirelessActive ? "#66cc66" : "#aaaaaa"
+                    font.pixelSize: 14
+                }
+
+                MouseArea {
+                    id: wirelessMa
+                    anchors.fill: parent
+                    onClicked: {
+                        if (aaSession.wirelessActive)
+                            aaSession.stopWireless()
+                        else
+                            aaSession.startWireless()
+                    }
+                }
+            }
         }
     }
 

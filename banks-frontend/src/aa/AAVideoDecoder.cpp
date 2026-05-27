@@ -1,6 +1,7 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/hwcontext.h>
 #include <libswscale/swscale.h>
 }
 
@@ -18,19 +19,18 @@ bool AAVideoDecoder::open(int width, int height) {
     m_height = height;
 
     const AVCodec* codec = nullptr;
-    [[maybe_unused]] bool hwdec = false;
+    bool hwdec = false;
+
 #ifdef BANKS_AA_NVDEC
     codec = avcodec_find_decoder_by_name("h264_nvv4l2dec");
     if (codec) {
         hwdec = true;
-        qInfo("[AAVideoDecoder] found NVDEC h264_nvv4l2dec");
-    } else {
-        qWarning("[AAVideoDecoder] h264_nvv4l2dec not available, falling back to sw");
+        qInfo("[AAVideoDecoder] using NVDEC h264_nvv4l2dec");
     }
 #endif
-    if (!codec) {
+
+    if (!codec)
         codec = avcodec_find_decoder(AV_CODEC_ID_H264);
-    }
     if (!codec) {
         qWarning("[AAVideoDecoder] h264 decoder not found");
         return false;
@@ -39,16 +39,28 @@ bool AAVideoDecoder::open(int width, int height) {
     m_ctx = avcodec_alloc_context3(codec);
     m_ctx->width = width;
     m_ctx->height = height;
+
+#ifndef BANKS_AA_NVDEC
+    if (av_hwdevice_ctx_create(&m_hwDeviceCtx, AV_HWDEVICE_TYPE_VAAPI, "/dev/dri/renderD128", nullptr, 0) == 0) {
+        m_ctx->hw_device_ctx = av_buffer_ref(m_hwDeviceCtx);
+        m_ctx->hwaccel_flags |= AV_HWACCEL_FLAG_ALLOW_PROFILE_MISMATCH;
+        hwdec = true;
+        qInfo("[AAVideoDecoder] VAAPI hw device created");
+    } else {
+        qInfo("[AAVideoDecoder] VAAPI not available, using software decode");
+    }
+#endif
+
     if (!hwdec)
         m_ctx->thread_count = 2;
 
     if (avcodec_open2(m_ctx, codec, nullptr) < 0) {
         qWarning("[AAVideoDecoder] failed to open codec");
+        if (m_hwDeviceCtx) { av_buffer_unref(&m_hwDeviceCtx); m_hwDeviceCtx = nullptr; }
         avcodec_free_context(&m_ctx);
         return false;
     }
 
-    // sws_context created lazily in convertFrame() based on actual decoded format
     m_sws = nullptr;
     m_swsSrcFmt = -1;
     m_swsWidth = 0;
@@ -56,7 +68,8 @@ bool AAVideoDecoder::open(int width, int height) {
 
     m_running = true;
     m_thread = std::thread(&AAVideoDecoder::decodeLoop, this);
-    qInfo("[AAVideoDecoder] opened %dx%d %s", width, height, codec->name);
+    qInfo("[AAVideoDecoder] opened %dx%d %s%s", width, height, codec->name,
+          hwdec ? " (hw accel)" : " (software)");
     return true;
 }
 
@@ -71,6 +84,7 @@ void AAVideoDecoder::close() {
     m_swsWidth = 0;
     m_swsHeight = 0;
     if (m_ctx) { avcodec_free_context(&m_ctx); }
+    if (m_hwDeviceCtx) { av_buffer_unref(&m_hwDeviceCtx); m_hwDeviceCtx = nullptr; }
 }
 
 void AAVideoDecoder::feedNalUnit(const uint8_t* data, size_t size) {
@@ -126,9 +140,20 @@ bool AAVideoDecoder::decodePacket(AVPacket* pkt) {
 }
 
 void AAVideoDecoder::convertFrame(AVFrame* avf) {
+    AVFrame* swFrame = nullptr;
+
+    if (avf->format == AV_PIX_FMT_VAAPI) {
+        swFrame = av_frame_alloc();
+        if (av_hwframe_transfer_data(swFrame, avf, 0) < 0) {
+            qWarning("[AAVideoDecoder] av_hwframe_transfer_data failed");
+            av_frame_free(&swFrame);
+            return;
+        }
+        avf = swFrame;
+    }
+
     auto srcFmt = static_cast<AVPixelFormat>(avf->format);
 
-    // Recreate sws_context when source format or dimensions change
     if (!m_sws || m_swsSrcFmt != avf->format
                || m_swsWidth != avf->width || m_swsHeight != avf->height) {
         if (m_sws) sws_freeContext(m_sws);
@@ -138,6 +163,7 @@ void AAVideoDecoder::convertFrame(AVFrame* avf) {
         if (!m_sws) {
             qWarning("[AAVideoDecoder] sws_getContext failed for fmt %d %dx%d",
                      avf->format, avf->width, avf->height);
+            if (swFrame) av_frame_free(&swFrame);
             return;
         }
         m_swsSrcFmt = avf->format;
@@ -158,6 +184,8 @@ void AAVideoDecoder::convertFrame(AVFrame* avf) {
     uint8_t* dst[1] = { f->rgba.data() };
     int dstStride[1] = { avf->width * 4 };
     sws_scale(m_sws, avf->data, avf->linesize, 0, avf->height, dst, dstStride);
+
+    if (swFrame) av_frame_free(&swFrame);
 
     m_latestFrame.store(std::move(f));
     if (m_frameReady) m_frameReady();

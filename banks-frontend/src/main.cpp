@@ -61,9 +61,7 @@ int main(int argc, char** argv) {
     }
 
     // Verbose Qt scene-graph info to stderr by default in dev builds.
-    qputenv("QSG_INFO", "1");
     QLoggingCategory::setFilterRules(
-        "qt.scenegraph.general=true\n"
         "banks.*=true\n"
     );
 

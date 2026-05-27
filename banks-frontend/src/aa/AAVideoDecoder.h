@@ -11,6 +11,7 @@
 #include <functional>
 
 struct AVCodecContext;
+struct AVBufferRef;
 struct AVFrame;
 struct AVPacket;
 struct SwsContext;
@@ -43,6 +44,7 @@ private:
     void convertFrame(AVFrame* avf);
 
     AVCodecContext* m_ctx = nullptr;
+    AVBufferRef* m_hwDeviceCtx = nullptr;
     SwsContext* m_sws = nullptr;
     int m_width = 0;
     int m_height = 0;
