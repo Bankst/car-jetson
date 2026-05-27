@@ -21,7 +21,20 @@
 #include "aa/BluetoothManager.h"
 #include "aa/LogCapture.h"
 
+#include <QLockFile>
+#include <QStandardPaths>
+
 int main(int argc, char** argv) {
+    // Single instance lock
+    QLockFile lockFile(QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/banks-frontend.lock");
+    if (!lockFile.tryLock(100)) {
+        qint64 pid = 0;
+        QString hostname, appname;
+        lockFile.getLockInfo(&pid, &hostname, &appname);
+        fprintf(stderr, "banks-frontend already running (pid %lld). Exiting.\n", (long long)pid);
+        return 1;
+    }
+
     // Verbose Qt scene-graph info to stderr by default in dev builds.
     qputenv("QSG_INFO", "1");
     QLoggingCategory::setFilterRules(
