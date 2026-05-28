@@ -1,0 +1,7 @@
+build/
+.cache/
+log.txt
+favorites.json
+*.swp
+.DS_Store
+logs/

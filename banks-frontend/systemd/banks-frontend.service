@@ -1,0 +1,18 @@
+[Unit]
+Description=Banks Infotainment Frontend (Qt6 Quick)
+After=multi-user.target pipewire.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+Environment=XDG_RUNTIME_DIR=/run/kiosk
+Environment=WAYLAND_DISPLAY=wayland-kiosk
+Environment=QT_QPA_PLATFORM=wayland
+Environment=QT_QUICK_BACKEND=rhi
+Environment=QSG_RHI_BACKEND=opengl
+ExecStart=/usr/bin/banks-frontend
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
