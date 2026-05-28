@@ -135,6 +135,12 @@ void AASessionController::setAutoStart(bool v) {
     }
 }
 
+// Public hook for app shutdown. Caller should invoke before QML teardown so
+// the phone sees a clean ByeBye and io/usb threads join before event loop dies.
+void AASessionController::shutdown() {
+    if (m_sessionActive) deactivate();
+}
+
 float AASessionController::micLevel() const {
     return m_micInput ? m_micInput->peakLevel() : 0.0f;
 }
@@ -297,11 +303,10 @@ void AASessionController::onHeartbeatTimeout() {
 void AASessionController::startUSB() {
     setStatus(QStringLiteral("Initializing USB..."));
 
-    libusb_context* usbCtx = nullptr;
-    libusb_init(&usbCtx);
+    libusb_init(&m_usbCtx);
 
     m_ioService = std::make_unique<boost::asio::io_service>();
-    m_usbWrapper = std::make_unique<aasdk::usb::USBWrapper>(usbCtx);
+    m_usbWrapper = std::make_unique<aasdk::usb::USBWrapper>(m_usbCtx);
     m_tcpWrapper = std::make_unique<aasdk::tcp::TCPWrapper>();
 
     auto queryFactory = std::make_shared<aasdk::usb::AccessoryModeQueryFactory>(
@@ -354,7 +359,7 @@ void AASessionController::startUSB() {
     // re-enumerates and the hotplug callback fires cleanly.
     {
         libusb_device** devs = nullptr;
-        auto cnt = libusb_get_device_list(usbCtx, &devs);
+        auto cnt = libusb_get_device_list(m_usbCtx, &devs);
         for (ssize_t i = 0; i < cnt; ++i) {
             libusb_device_descriptor desc{};
             if (libusb_get_device_descriptor(devs[i], &desc) == 0 &&
@@ -455,6 +460,10 @@ void AASessionController::stopUSB() {
 
     for (auto& t : m_ioThreads) if (t.joinable()) t.join();
     m_ioThreads.clear();
+
+    // USB threads block in libusb_handle_events with no timeout. Wake them so
+    // they observe m_ioService->stopped() and exit their loop.
+    if (m_usbCtx) libusb_interrupt_event_handler(m_usbCtx);
     for (auto& t : m_usbThreads) if (t.joinable()) t.join();
     m_usbThreads.clear();
 
@@ -470,6 +479,8 @@ void AASessionController::stopUSB() {
     m_usbWrapper.reset();
     m_ioService.reset();
     m_aaConfig.reset();
+
+    if (m_usbCtx) { libusb_exit(m_usbCtx); m_usbCtx = nullptr; }
 
     m_decoder->close();
 }

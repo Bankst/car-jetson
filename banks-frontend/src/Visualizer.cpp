@@ -238,6 +238,12 @@ QString Visualizer::lastPresetHint() const {
     return m_favorites ? m_favorites->lastPreset() : QString{};
 }
 
+void Visualizer::persistState() {
+    if (m_favorites && !m_currentFilename.isEmpty()) {
+        m_favorites->setLastPreset(m_currentFilename);
+    }
+}
+
 bool Visualizer::toggleFavorite() {
     if (!m_favorites || m_currentFilename.isEmpty()) return false;
     const bool on = m_favorites->toggle(m_currentFilename);

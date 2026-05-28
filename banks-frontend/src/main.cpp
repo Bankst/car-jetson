@@ -8,6 +8,11 @@
 #include <QSocketNotifier>
 
 #include <QLoggingCategory>
+#include <QSocketNotifier>
+
+#include <csignal>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include "AudioCapture.h"
 #include "Visualizer.h"
@@ -21,9 +26,12 @@
 #include "aa/BluetoothPairingAgent.h"
 #include "aa/BluetoothManager.h"
 #include "aa/LogCapture.h"
+#include "CanInfo.h"
+#include "SleepManager.h"
 
 #include <QCommandLineParser>
 #include <QLockFile>
+#include <QProcess>
 #include <QStandardPaths>
 
 #include <csignal>
@@ -123,6 +131,7 @@ int main(int argc, char** argv) {
     qmlRegisterType<BluetoothPairingAgent>("BanksFrontend", 1, 0, "BluetoothPairingAgent");
     qmlRegisterType<BluetoothManager>("BanksFrontend", 1, 0, "BluetoothManager");
     qmlRegisterSingletonInstance("BanksFrontend", 1, 0, "LogCapture", LogCapture::instance());
+    qmlRegisterType<CanInfo>("BanksFrontend", 1, 0, "CanInfo");
 
     QQmlApplicationEngine engine;
     engine.loadFromModule("BanksFrontend", "Main");
@@ -130,6 +139,44 @@ int main(int argc, char** argv) {
 
     auto* win = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
     ImGuiOverlay::installOn(win);
+
+    // Tear down the AA session before the QML tree dies. QML-owned controllers
+    // are destroyed too late for a clean ByeBye + USB thread join.
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &app, [&engine]{
+        for (auto* root : engine.rootObjects()) {
+            for (auto* ctl : root->findChildren<AASessionController*>()) {
+                ctl->shutdown();
+            }
+        }
+    });
+
+    // ----------------------------------------------------------------------
+    // App-wide sleep/wake coordinator. Triggers:
+    //   - logind PrepareForSleep (real Jetson suspend, automatic)
+    //   - SIGUSR1 / SIGUSR2 (manual test triggers)
+    //
+    // Subscribers: AA session (ByeBye + USB teardown), AudioCapture (pause),
+    // Visualizer (persist preset to disk), Bluetooth (rfkill).
+    // ----------------------------------------------------------------------
+    SleepManager sleepMgr;
+
+    QObject::connect(&sleepMgr, &SleepManager::sleeping, &app, [&engine, audio]{
+        for (auto* root : engine.rootObjects()) {
+            for (auto* ctl : root->findChildren<AASessionController*>()) ctl->deactivate();
+            for (auto* viz : root->findChildren<Visualizer*>())            viz->persistState();
+        }
+        audio->stop();
+        // BT off via rfkill. Async; fire-and-forget.
+        QProcess::startDetached("rfkill", {"block", "bluetooth"});
+    });
+
+    QObject::connect(&sleepMgr, &SleepManager::waking, &app, [&engine, audio]{
+        QProcess::startDetached("rfkill", {"unblock", "bluetooth"});
+        audio->start();
+        for (auto* root : engine.rootObjects()) {
+            for (auto* ctl : root->findChildren<AASessionController*>()) ctl->activate();
+        }
+    });
 
     return app.exec();
 }

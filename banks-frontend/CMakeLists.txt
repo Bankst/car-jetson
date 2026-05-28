@@ -97,9 +97,11 @@ find_package(Threads   REQUIRED)
 
 # --- aasdk + openauto (Android Auto protocol) ---
 find_package(Protobuf REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system log_setup log)
+find_package(Boost REQUIRED COMPONENTS system)
 find_package(OpenSSL REQUIRED)
 pkg_check_modules(LIBUSB REQUIRED IMPORTED_TARGET libusb-1.0)
+find_package(spdlog REQUIRED)
+find_package(fmt REQUIRED)
 
 # aap_protobuf: protocol buffer library from aasdk repo
 FetchContent_Declare(aasdk
@@ -117,6 +119,9 @@ add_subdirectory(${aasdk_SOURCE_DIR}/protobuf ${aasdk_BINARY_DIR}/protobuf)
 # aasdk-lib: core protocol library (bypasses upstream CMakeLists)
 file(GLOB_RECURSE AASDK_SOURCES ${aasdk_SOURCE_DIR}/src/*.cpp)
 list(FILTER AASDK_SOURCES EXCLUDE REGEX ".*\\.ut\\.cpp$")
+# Drop upstream ModernLogger — replaced with spdlog-forwarding shim below.
+list(FILTER AASDK_SOURCES EXCLUDE REGEX ".*/ModernLogger\\.cpp$")
+list(APPEND AASDK_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/compat/aasdk-modern-logger.cpp)
 add_library(aasdk-lib STATIC ${AASDK_SOURCES})
 target_include_directories(aasdk-lib
     PUBLIC
@@ -128,9 +133,10 @@ target_include_directories(aasdk-lib
 target_link_libraries(aasdk-lib PUBLIC
     aap_protobuf
     ${Protobuf_LIBRARIES}
-    Boost::system Boost::log_setup Boost::log
+    Boost::system
     OpenSSL::SSL OpenSSL::Crypto
     PkgConfig::LIBUSB
+    spdlog::spdlog
 )
 target_compile_definitions(aasdk-lib PUBLIC BOOST_ALL_DYN_LINK)
 set_target_properties(aasdk-lib PROPERTIES CXX_STANDARD 17)
@@ -187,10 +193,13 @@ qt_wrap_cpp(OPENAUTO_MOC_SOURCES
     TARGET openauto-core
 )
 add_library(openauto-core STATIC ${OPENAUTO_CORE_SOURCES} ${OPENAUTO_MOC_SOURCES})
+# compat dir BEFORE upstream include — overrides openauto's Log.hpp shim
+# (which would otherwise pull boost::log).
+target_include_directories(openauto-core BEFORE PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/compat)
 target_include_directories(openauto-core
     PUBLIC ${openauto_SOURCE_DIR}/include
 )
-target_link_libraries(openauto-core PUBLIC aasdk-lib Qt6::Core Qt6::Gui Qt6::Network Qt6::Bluetooth)
+target_link_libraries(openauto-core PUBLIC aasdk-lib Qt6::Core Qt6::Gui Qt6::Network Qt6::Bluetooth spdlog::spdlog)
 if(BANKS_AA_GPS)
     target_include_directories(openauto-core PRIVATE ${GPS_INCLUDE_DIR})
     target_link_libraries(openauto-core PRIVATE ${GPS_LIBRARY})
@@ -206,6 +215,7 @@ pkg_check_modules(SYSTEMD   REQUIRED IMPORTED_TARGET libsystemd)
 pkg_check_modules(AVCODEC   REQUIRED IMPORTED_TARGET libavcodec)
 pkg_check_modules(AVUTIL    REQUIRED IMPORTED_TARGET libavutil)
 pkg_check_modules(SWSCALE   REQUIRED IMPORTED_TARGET libswscale)
+pkg_check_modules(SOCKETCAN REQUIRED IMPORTED_TARGET libsocketcan)
 
 # --- App ---
 qt_add_executable(banks-frontend
@@ -233,6 +243,8 @@ qt_add_executable(banks-frontend
     src/aa/BluetoothPairingAgent.h src/aa/BluetoothPairingAgent.cpp
     src/aa/BluetoothManager.h      src/aa/BluetoothManager.cpp
     src/aa/LogCapture.h            src/aa/LogCapture.cpp
+    src/CanInfo.h                  src/CanInfo.cpp
+    src/SleepManager.h             src/SleepManager.cpp
 )
 
 # Optional compile-time override for the favorites file location.
@@ -261,7 +273,7 @@ qt_add_qml_module(banks-frontend
         qml/SettingsCanPage.qml
         qml/SettingsMediaPage.qml
         qml/SettingsSystemPage.qml
-        qml/SettingsLogPage.qml
+        qml/SettingsLogsPage.qml
     RESOURCES
         qml/qtquickcontrols2.conf
 )
@@ -282,6 +294,7 @@ target_link_libraries(banks-frontend PRIVATE
     PkgConfig::AVCODEC
     PkgConfig::AVUTIL
     PkgConfig::SWSCALE
+    PkgConfig::SOCKETCAN
     Threads::Threads
 )
 

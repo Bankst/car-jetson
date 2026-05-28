@@ -65,6 +65,11 @@ public:
     Q_INVOKABLE void startWireless();
     Q_INVOKABLE void stopWireless();
 
+    // Synchronous tear-down hook for app shutdown. Idempotent.
+    // Wakes USB threads via libusb_interrupt_event_handler, joins them, then
+    // libusb_exit. Without this, threads block forever in libusb_handle_events.
+    void shutdown();
+
     std::shared_ptr<AAVideoDecoder> decoder() const { return m_decoder; }
     std::shared_ptr<aa::QmlInputDevice> inputDevice() const { return m_inputDevice; }
     BluetoothPairingAgent* pairingAgent() const { return m_pairingAgent; }
@@ -124,6 +129,7 @@ private:
 
     std::vector<std::thread> m_ioThreads;
     std::vector<std::thread> m_usbThreads;
+    struct libusb_context* m_usbCtx = nullptr;
 
     // 3 = VIDEO_1920x1080, 1 = VIDEO_FPS_60 (protobuf enum values)
     int m_videoResolution = 3;

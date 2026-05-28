@@ -14,9 +14,14 @@ ApplicationWindow {
     property alias aaSession: aaPage.aaSession
     property alias visualizer: vizPage.visualizer
     property alias spectrumWidget: spectrum
-    width:  Math.round(Screen.desktopAvailableWidth * 0.8)
-    height: Math.round(Screen.desktopAvailableHeight * 0.8)
     minimumWidth: 640; minimumHeight: 480
+
+    Component.onCompleted: {
+        if (visibility === Window.Windowed) {
+            width  = Math.min(targetW, Math.round(Screen.desktopAvailableWidth * 0.8))
+            height = Math.min(targetH, Math.round(Screen.desktopAvailableHeight * 0.8))
+        }
+    }
     title: "Banks"
 
     color: "#000"

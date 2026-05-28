@@ -55,6 +55,8 @@ public:
     Q_INVOKABLE void prev();
     Q_INVOKABLE void shuffle(bool on);
     Q_INVOKABLE bool toggleFavorite();   // returns new state
+    // Flush current preset to disk. Idempotent; safe to call anytime.
+    Q_INVOKABLE void persistState();
 
     // Renderer ctor reads this once to restore last-played preset.
     QString lastPresetHint() const;

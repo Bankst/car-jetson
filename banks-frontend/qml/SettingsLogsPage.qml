@@ -19,7 +19,7 @@ Item {
             Layout.fillWidth: true
             spacing: 8
 
-            Text { text: "Log"; color: "#fff"; font.pixelSize: 20; font.weight: Font.DemiBold }
+            Text { text: "Logs"; color: "#fff"; font.pixelSize: 20; font.weight: Font.DemiBold }
 
             Item { Layout.fillWidth: true }
 
