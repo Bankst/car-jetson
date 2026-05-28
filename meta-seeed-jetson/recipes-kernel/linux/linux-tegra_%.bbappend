@@ -15,9 +15,14 @@ SRC_URI:append = " \
     file://no-camera.cfg \
     file://no-bloat.cfg \
     file://no-debug.cfg \
-    file://no-audio-soc.cfg \
     file://feature-adds.cfg \
 "
+
+# Audio kernel config machine-gated:
+#   A203 V2: no I2S codec pinout, SoC audio off (boot speed + log noise)
+#   devkit : 40-pin header exposes DAP5/I2S5 -> PCM5102A; SoC audio on + SPDIF
+SRC_URI:append:jetson-xavier-nx-a203 = " file://no-audio-soc.cfg"
+SRC_URI:append:jetson-xavier-nx-banks-devkit = " file://audio-soc.cfg"
 
 # GCC 13 (scarthgap) compatibility — applies to ALL Xavier NX builds. L4T
 # 5.10 was authored for GCC 11; GCC 13 promotes several new warnings to
