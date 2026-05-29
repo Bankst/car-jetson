@@ -1,0 +1,6 @@
+# Derived extracts of refs/ PDFs. Regenerate via pdftotext (see README.md).
+TRM.txt
+PinGuide.txt
+*.toc
+.TRM.pageidx
+.*.pageidx
