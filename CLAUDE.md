@@ -11,7 +11,7 @@ Built and flash-tested. Boot from eMMC, rootfs on external NVMe (M.2 Key M 2242)
 | meta-tegra branch | **`scarthgap-l4t-r35.x`** | L4T R35.6.4 / JetPack 5.1.6, the latest L4T that still supports Xavier NX (dropped in JP6/R36) |
 | Kernel | linux-tegra 5.10.216 (NVIDIA's fork) | comes with the BSP |
 | Build framework | **kas-container** via Docker | Fedora 43 host isn't Yocto-supported; container sidesteps host-deps mess |
-| MACHINE | `jetson-xavier-nx-a203` | Custom; `requires jetson-xavier-nx-devkit-emmc.conf` and overrides storage + bootloader |
+| MACHINE | `jetson-xavier-nx-a203` (production) / `jetson-xavier-nx-banks-devkit` (dev) | Both `require jetson-xavier-nx-devkit-emmc.conf` and override storage + bootloader. Devkit variant exposes the 40-pin header (DAP5/I2S5 for PCM5102A, full UART debug). |
 | DISTRO | `banks-jetson` | Banks's flavour, defined in `meta-seeed-jetson/conf/distro/banks-jetson.conf` |
 | Init | systemd | |
 | Networking | NetworkManager (default) + systemd-networkd (kept available for nothing in particular; networkd is currently masked from owning anything) | NM owns Ethernet/Wi-Fi/USB-gadget bridge; CAN0 brought up at 500kbps via NM keyfile (NM 1.46+ has [can] section) |
@@ -74,6 +74,8 @@ meta-seeed-jetson/
     linux-tegra/spi.cfg                   # SPIDEV
     linux-tegra/usb-modem.cfg             # CDC_NCM, USB_SERIAL_OPTION, USB_WDM (cellular USB modems, off by default)
     linux-tegra/usb-gadget.cfg            # USB_GADGET, CONFIGFS_*, NCM/ACM/RNDIS/ECM
+    linux-tegra/audio-soc.cfg             # devkit only: Tegra ASoC + I2S5 + AHUB + ADMAIF + ADSP + SPDIF for PCM5102A
+    linux-tegra/no-audio-soc.cfg          # A203 only: disable SoC audio (no I2S codec on carrier)
   recipes-core/
     banks-persist/                        # UDA partition persistence: format, mount /data, bind-mount BT keys + SSH keys
     images/banks-jetson-image-{base,kiosk,plasma,lxqt}.bb
@@ -282,6 +284,49 @@ QCA BT firmware: `linux-firmware-qca` in packagegroup (rampatch_usb_00000302.bin
 
 Pairing: modern devices use SSP → KeyboardDisplay → Numeric Comparison → agent auto-accepts. KeyboardOnly triggers Passkey Entry → agent returns wrong fixed value → pairing fails.
 
+## PipeWire EQ / volume tooling (CLI prototype)
+
+Standalone bash scripts under `scripts/audio/`. Validate the userspace volume + EQ path **before** wiring `AudioMixer` / `AudioEQ` QObjects into banks-frontend.
+
+### Scripts
+
+| File | Purpose |
+|---|---|
+| `scripts/audio/banks-audio-test.sh` | Non-interactive validation. Discovery → volume ramp/mute → filter-chain install → live param sweep → teardown. |
+| `scripts/audio/banks-eq-live.sh` | Interactive live tester. Loops pink noise through filter-chain, keys (q/w/e/r/t/y...) adjust 3-band EQ live with bypass toggle + presets (flat/bass+/voice/treble+/V-shape). |
+
+Runs as root on devkit (system-instance PipeWire). Push via `scp -O <script> root@192.168.55.1:/root/`.
+
+### Architecture proven by tests
+
+- **Filter-chain config** lives in `/etc/pipewire/pipewire.conf.d/99-banks-eq.conf` (drop-in, merges into base `context.modules`). 6-node graph = 3 bands × 2 channels (parallel L/R chains). Inserts a virtual sink `banks_eq` (`media.class = Audio/Sink`) feeding real hardware sink via `node.passive = true`.
+- **Live control** via `pw-cli s <node_id> Props '{ params = [ "<node_name>:Gain" <dB> ... ] }'`. Filter-chain exposes each builtin biquad node's Gain/Freq/Q as live-writable params. Confirmed working on PW 1.0.9.
+- **Volume + mute** via `wpctl set-volume @DEFAULT_AUDIO_SINK@ <0..1>` / `wpctl set-mute @DEFAULT_AUDIO_SINK@ 0|1`. Standard userspace; no D-Bus bind required from app side.
+
+### Non-obvious deps + gotchas (carry into Yocto recipe + app integration)
+
+1. **Builtin filter labels lack underscores** in section names: `bq_highshelf` / `bq_lowshelf` / `bq_lowpass` / `bq_highpass` / `bq_peaking` / `bq_notch` / `bq_bandpass` / `bq_allpass`. `bq_high_shelf` (with underscore) fails as "cannot find label" and pipewire.service refuses to start — bricks audio until config removed.
+2. **Filter-chain nodes are mono.** Stereo requires duplicated chains (`low_l`/`low_r`, etc.) with two inputs / two outputs at the graph boundary. Single-chain `inputs = [ "n:In" "n:In" ]` works but downmixes L+R to mono.
+3. **`pw-cat` has no `--raw` flag.** Stdin reads expect WAV. For streaming gapless audio: write WAV header with max-int `data` size to stdout, then keep streaming raw PCM bytes — `pw-cat -p -` plays continuously until pipe closes. See `banks-eq-live.sh` (`render_pink_gen` + `start_noise` setsid pattern).
+4. **Yocto python3 stdlib subset.** `import wave` fails — `python3-audio` not in our image. Workaround: inline RIFF header via `struct.pack`. Same applies to any other rare stdlib module — assume nothing beyond `os`/`sys`/`struct`/`math`/`random` is present.
+5. **Image lacks `pactl`** (despite `pipewire-pulse` installed) and **lacks `pkill`** (busybox `ps`/`kill` only). Use `wpctl` for volume, manage child processes via `setsid` + process group kill (`kill -- -$PGID`), avoid `pkill -f` patterns.
+6. **Filter-chain config restart sequence**: drop config → `systemctl restart pipewire wireplumber` (NO `pipewire-pulse.service` — unit doesn't exist on our image despite the package being installed). Health-loop poll `systemctl is-active --quiet pipewire && wpctl status` before declaring success. If config rejected, pipewire enters restart loop and audio is fully down until config removed.
+7. **`pipewire-tools` + `pipewire-pulse` debs needed** for `pw-cli` / `pw-cat`. Not in base image yet. Push: `scp -O build/tmp/deploy/deb/armv8a_tegra/pipewire-{tools,pulse}_1.0.9*.deb root@target:/tmp/ && jtx ssh 'dpkg -i /tmp/pipewire-tools_*.deb /tmp/pipewire-pulse_*.deb'`. Bake into image before any in-app EQ work.
+
+### Known issues (not yet fixed)
+
+- **`banks-eq-live.sh` quit hang**: lowercase `q` is mapped to "low band -1 dB" so users press `q` expecting quit, gets a gain bump and stays in loop. `Q` (uppercase) IS quit but unintuitive. Ctrl-C delivery during `read -rsn1 -t 86400` is sluggish. Fix: shorten read timeout to ~1s + accept both `q` and `Q` as quit + add explicit on-screen "press Q to quit" reminder.
+- **Teardown can't always relocate prior default sink** after PW restart — string match between `node.name` and `wpctl status` description column is brittle. WirePlumber's default-routes-policy normally re-elects sensibly; manual `wpctl set-default <id>` is one command. Won't matter once we ship `99-banks-eq.conf` as a permanent drop-in.
+- **Stale `Audio/Sink banks_eq` ghost entry** under `wpctl status` Video section after teardown — PW state-store residue. Clears on next full PW restart cycle. Cosmetic.
+
+### Next steps (when resuming)
+
+1. Fix quit-key + read-timeout bugs in `banks-eq-live.sh`.
+2. Add presets-from-JSON loader to `banks-eq-live.sh`. Stash presets at `/etc/banks-audio/eq-presets/*.json`.
+3. Yocto recipe `meta-seeed-jetson/recipes-multimedia/banks-audio/` shipping `99-banks-eq.conf` + presets dir. Add `pipewire-tools` + `pipewire-pulse` to image packagegroup.
+4. Wire `AudioMixer` + `AudioEQ` QObjects into banks-frontend. Mixer talks to `wpctl` via QProcess (or libpipewire). EQ writes `pw-cli s ... Props ...` for per-band Gain.
+5. Settings → Audio QML page with sink picker + master volume + 5/10-band EQ sliders + preset selector.
+
 ## SD Card / DeviceTree
 
 ### How DTB reaches kernel
@@ -370,9 +415,15 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
     - **SSH persistence**: bind-mount individual `ssh_host_*` key files, NOT the entire `/etc/ssh/`. Binding the whole dir overwrites rootfs `sshd_config` with stale UDA copy, reverting UsePAM/KEX optimizations.
     - **Triggerhappy socket activation**: must be masked in kiosk image. Socket-activated `thd` ignores `--deviceglob` and waits for `th-cmd --passfd` from udev — keyboard hotkeys silently stop working.
 
-18. **Tegra SoC audio (AHUB / ADMAIF / ADSP / I2S / DMIC / DSPK / AMX / ADX / SFC / MVC / MIXER / AFC / IQC / OPE / ARAD / ASRC) disabled in `no-audio-soc.cfg`.** A203 V2 and bare devkit have no I2S DAC, DMIC, or DSPK pins wired. The Tegra audio crossbar fabric is dead weight on these boards. Keeping the drivers built triggers (a) ~17 modules loading during udev coldplug, (b) `tegra210_adsp` driver iterating FE/BE DAI links from the generic `tegrasndt186ref` machine driver and spamming `Broken Path1 - FE not linked to BE` (~14 messages, ~3s of post-login log churn) because the DT enables ADSP DAI nodes that the machine driver doesn't pair with any BE on a board with no I2S routing. **Kept on:** `SND_HDA_TEGRA` (HDMI audio out), `SND_USB_AUDIO` (USB headsets — current audio path via PipeWire + BT A2DP), and the kernel core sound subsystem.
-    - **If/when I2S in/out is wired on a future carrier**: revert `no-audio-soc.cfg` (`git rm meta-seeed-jetson/recipes-kernel/linux/linux-tegra/no-audio-soc.cfg` + drop the SRC_URI line in `linux-tegra_%.bbappend`). The "Broken Path" spam can then be silenced via either (a) DT overlay disabling unused ADSP DAI nodes (`status = "disabled"` on the offending `tegra210-adsp-audio` children in the carrier DTSI), (b) a custom machine driver scoped to the actual I2S routing instead of the generic `tegrasndt186ref`, or (c) demoting the `dev_err` → `dev_dbg` in `tegra210_adsp_alt.c` at `tegra-alt/tegra210_adsp_alt.c:1409` and `:1734`. Option (a) is cleanest. The audio HW block reference is documented in `docs/boot-optimization-2026-05-20/` (or ask me — see "tegra audio block diagram" tags in session memory).
-    - **OPE specifically**: lives inside AHUB. Reaching OPE from software requires AHUB + ADMAIF (SW→HUB DMA gateway) + a physical output (I2S or DSPK). HDMI audio uses HDA, separate from AHUB. So enabling OPE requires both restoring `no-audio-soc.cfg` items AND wiring a DAC pin route. PipeWire feeds ADMAIF for HUB-routed paths.
+18. **Tegra SoC audio is machine-gated.** A203 V2 carrier has no I2S DAC / DMIC / DSPK pins routed, so the Tegra audio crossbar (AHUB / ADMAIF / ADSP / I2S / DMIC / DSPK / AMX / ADX / SFC / MVC / MIXER / AFC / IQC / OPE / ARAD / ASRC) is **disabled** there via `no-audio-soc.cfg`. NVIDIA devkit P3509 (`jetson-xavier-nx-banks-devkit`) exposes I2S5 on the 40-pin header (DAP5: pin 12 BCLK, 35 LRCLK, 40 SDATA), so it gets the full SoC audio stack via `audio-soc.cfg`. Gating lives in `linux-tegra_%.bbappend`:
+    ```
+    SRC_URI:append:jetson-xavier-nx-a203          = " file://no-audio-soc.cfg"
+    SRC_URI:append:jetson-xavier-nx-banks-devkit  = " file://audio-soc.cfg"
+    ```
+    - **Why off on A203**: ~17 modules loading during udev coldplug, plus `tegra210_adsp` driver iterating FE/BE DAI links from the generic `tegrasndt186ref` machine driver and spamming `Broken Path1 - FE not linked to BE` (~14 messages, ~3s of post-login log churn) because the DT enables ADSP DAI nodes that the machine driver doesn't pair with any BE on a board with no I2S routing. Even on devkit you'll still see this spam at boot — cosmetic only. Silence later via DT overlay (`status = "disabled"` on unused `tegra210-adsp-audio` children) or by demoting `dev_err → dev_dbg` in `tegra-alt/tegra210_adsp_alt.c:1409,1734`.
+    - **A203 keepers**: `SND_HDA_TEGRA` (HDMI audio out), `SND_USB_AUDIO` (USB headsets), kernel core sound subsystem.
+    - **Devkit + PCM5102A**: stock devkit DTS (`tegra194-p3668-all-p3509-0000.dts`) already enables `tegra_i2s5` with `I2S_DUMMY` codec on the `I2S_DAP` cell via `tegra194-audio-p3668.dtsi` + `tegra186-audio-dai-links.dtsi:1003`. PCM5102A is pin-strap configured (no I2C/SPI control bus), so **no DT overlay or codec node is required** — just turn the SoC audio kernel drivers back on and ALSA exposes card 1 "APE" with 20 ADMAIF PCMs + 2 ADSP FE devices. Header→PCM5102A pinout: 12→BCK, 35→LCK, 40→DIN; SCK→GND, XSMT→3.3V (un-mute — common silence cause), FLT/DEMP→GND. Route ADMAIF to I2S5 in XBAR before playing: `amixer -c APE cset name='I2S5 Mux' 'ADMAIF1'`.
+    - **OPE specifically**: lives inside AHUB. Reaching OPE from software requires AHUB + ADMAIF (SW→HUB DMA gateway) + a physical output (I2S or DSPK). HDMI audio uses HDA, separate from AHUB. PipeWire feeds ADMAIF for HUB-routed paths.
 
 ## Open follow-ups
 
@@ -386,7 +437,7 @@ kas-container shell kas/base.yml -c "bitbake -f -c do_install <recipe> && bitbak
 - ~~Touch support~~ — **fixed** with matchbox-terminal (GTK3/VTE). Mouse/touch working in media player TUI.
 - projectM audio visualizer — recipes built (libprojectm + frontend-sdl2), GLES shader fixed, SDL2 PipeWire backend enabled. Presets need to be bundled into the image (currently pushed manually). ImGui overlay needs testing after GLES shader fix.
 - Transparent terminal overlay for BT track info on top of projectM — matchbox-terminal supports VTE RGBA alpha, needs small patch.
-- I2S DAC wiring for actual audio output — currently routes to USB headset or null sink.
+- ~~I2S DAC wiring for actual audio output~~ — **enabled on devkit machine.** Stock devkit DTS wires I2S5 to 40-pin header; SoC audio kernel drivers re-enabled via machine-gated `audio-soc.cfg`. PCM5102A (pin-strap, no control bus) plugs straight in. A203 still routes to USB headset / BT A2DP (no I2S codec pinout on that carrier).
 - Replace `debug-tweaks` (passwordless root) with proper user account once dev workflow settled.
 - Plasma image (`kas/plasma.yml`) build not yet attempted. Expect KDE Plasma 6 Wayland via KWin; first time on Tegra so sharp edges likely.
 - LXQt variant kas/recipe pair when ready.
