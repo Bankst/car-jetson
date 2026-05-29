@@ -1,6 +1,7 @@
 #!/bin/bash
-# Banks live EQ tester — loops pink noise through filter-chain, keys adjust gains.
-# Target: jetson devkit, system-instance PipeWire.
+# Banks live EQ tester — loops pink noise through a param_eq filter-chain,
+# keys adjust per-band gains live. 8 bands stereo via single param_eq node.
+# Target: jetson devkit, system-instance PipeWire 1.0.9.
 set -uo pipefail
 
 PW_CONF_DIR=/etc/pipewire/pipewire.conf.d
@@ -11,24 +12,28 @@ KEEP_CONF=0        # 1 = leave config installed on exit (for app-side testing)
 
 for t in wpctl pw-cli pw-cat python3 systemctl; do command -v "$t" >/dev/null || { echo "missing $t" >&2; exit 1; }; done
 
-PREV_DEFAULT=$(wpctl inspect @DEFAULT_AUDIO_SINK@ | awk -F'"' '/node\.name/{print $2; exit}')
-PREV_DEFAULT_DESC=$(wpctl inspect @DEFAULT_AUDIO_SINK@ | awk -F'"' '/node\.description/{print $2; exit}')
+PREV_DEFAULT=$(wpctl inspect @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk -F'"' '/node\.name/{print $2; exit}')
+PREV_DEFAULT_DESC=$(wpctl inspect @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk -F'"' '/node\.description/{print $2; exit}')
 
-# Gain state (dB).
-GLOW=0.0
-GMID=0.0
-GHI=0.0
+# 8 bands: low shelf, 6 peaks, high shelf. Centre frequencies (Hz) and Q.
+BAND_FREQS=(60 150 400 1000 2500 6000 10000 15000)
+BAND_QS=(0.7 1.0 1.0 1.0 1.0 1.0 1.0 0.7)
+BAND_TYPES=(bq_lowshelf bq_peaking bq_peaking bq_peaking bq_peaking bq_peaking bq_peaking bq_highshelf)
+BAND_LABELS=("60Hz LS" "150Hz" "400Hz" "1kHz" "2.5kHz" "6kHz" "10kHz" "15kHz HS")
+
+# Live gain state (dB), one per band, plus a snapshot of "applied" gains for ramping.
+GAINS=(0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0)
+APPLIED=(0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0)
 BYPASS=0
 
 # Streaming pink noise generator. Writes WAV header with max data size, then
-# generates samples to stdout forever until SIGPIPE. pw-cat reads header once,
-# plays continuously — no loop seam.
+# generates samples to stdout forever until SIGPIPE.
 render_pink_gen() {
   cat > "$NOISE_GEN" <<'PY'
 import math, struct, sys, random
 SR = 48000; CH = 2; BPS = 16
 BR = SR*CH*BPS//8; BA = CH*BPS//8
-DS = 0x7FFFFF00  # ~2 GB; pw-cat keeps reading regardless
+DS = 0x7FFFFF00
 hdr = (b"RIFF" + struct.pack("<I", 36+DS) + b"WAVE"
        + b"fmt " + struct.pack("<IHHIIHH", 16, 1, CH, SR, BR, BA, BPS)
        + b"data" + struct.pack("<I", DS))
@@ -45,7 +50,7 @@ def pink(w):
     p  = b0+b1+b2+b3+b4+b5+b6+w*0.5362
     b6 = w*0.115926
     return p * 0.11
-CHUNK = 2048  # frames per write -> 4096 samples -> ~43 ms latency
+CHUNK = 2048
 try:
     while True:
         buf = bytearray()
@@ -62,12 +67,18 @@ PY
 }
 
 ensure_config() {
-  if [[ -f "$EQ_CONF" ]] && grep -q "$SINK_NAME" "$EQ_CONF"; then
-    echo "config already present at $EQ_CONF"
+  if [[ -f "$EQ_CONF" ]] && grep -q "param_eq" "$EQ_CONF" 2>/dev/null && grep -q "$SINK_NAME" "$EQ_CONF"; then
+    echo "config already present at $EQ_CONF (param_eq form)"
     return 0
   fi
   mkdir -p "$PW_CONF_DIR"
-  cat > "$EQ_CONF" <<'EOF'
+  # Build the filters = [ ... ] block from the band arrays.
+  local filters=""
+  local i
+  for i in 0 1 2 3 4 5 6 7; do
+    filters+="            { type = ${BAND_TYPES[$i]} freq = ${BAND_FREQS[$i]} gain = 0.0 q = ${BAND_QS[$i]} }"$'\n'
+  done
+  cat > "$EQ_CONF" <<EOF
 context.modules = [
   { name = libpipewire-module-filter-chain
     args = {
@@ -75,36 +86,24 @@ context.modules = [
       media.name       = "Banks EQ"
       filter.graph = {
         nodes = [
-          { type = builtin name = low_l label = bq_peaking
-            control = { Freq =    80 Q = 1.0 Gain = 0.0 } }
-          { type = builtin name = mid_l label = bq_peaking
-            control = { Freq =  1000 Q = 1.0 Gain = 0.0 } }
-          { type = builtin name = hi_l  label = bq_highshelf
-            control = { Freq = 10000 Q = 0.7 Gain = 0.0 } }
-          { type = builtin name = low_r label = bq_peaking
-            control = { Freq =    80 Q = 1.0 Gain = 0.0 } }
-          { type = builtin name = mid_r label = bq_peaking
-            control = { Freq =  1000 Q = 1.0 Gain = 0.0 } }
-          { type = builtin name = hi_r  label = bq_highshelf
-            control = { Freq = 10000 Q = 0.7 Gain = 0.0 } }
+          { type = builtin name = eq label = param_eq
+            config = {
+              filters = [
+$filters            ]
+            }
+          }
         ]
-        links = [
-          { output = "low_l:Out" input = "mid_l:In" }
-          { output = "mid_l:Out" input = "hi_l:In"  }
-          { output = "low_r:Out" input = "mid_r:In" }
-          { output = "mid_r:Out" input = "hi_r:In"  }
-        ]
-        inputs  = [ "low_l:In"  "low_r:In" ]
-        outputs = [ "hi_l:Out"  "hi_r:Out" ]
+        inputs  = [ "eq:In 1" "eq:In 2" ]
+        outputs = [ "eq:Out 1" "eq:Out 2" ]
       }
       capture.props  = {
-        node.name      = "banks_eq"
+        node.name      = "$SINK_NAME"
         media.class    = "Audio/Sink"
         audio.channels = 2
         audio.position = [ FL FR ]
       }
       playback.props = {
-        node.name      = "banks_eq_out"
+        node.name      = "${SINK_NAME}_out"
         node.passive   = true
         audio.channels = 2
         audio.position = [ FL FR ]
@@ -115,7 +114,7 @@ context.modules = [
 EOF
   echo "wrote $EQ_CONF, restarting pipewire..."
   systemctl restart pipewire wireplumber
-  for i in 1 2 3 4 5 6 7 8 9 10; do
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1
     if systemctl is-active --quiet pipewire && wpctl status >/dev/null 2>&1; then return 0; fi
   done
@@ -131,19 +130,58 @@ find_eq_id() {
   [[ -n "$EQ_ID" ]]
 }
 
-# Apply current gain state to filter-chain (or zero if bypassed).
-apply_gains() {
-  local gl gm gh
-  if (( BYPASS )); then gl=0.0; gm=0.0; gh=0.0
-  else gl=$GLOW; gm=$GMID; gh=$GHI; fi
+# Write the current bypass-or-gain set to PipeWire in one Props pod.
+# param_eq exposes per-band controls as "Gain 1", "Gain 2", ..., "Gain 8".
+write_gains_now() {
+  local g1 g2 g3 g4 g5 g6 g7 g8
+  if (( BYPASS )); then
+    g1=0.0; g2=0.0; g3=0.0; g4=0.0; g5=0.0; g6=0.0; g7=0.0; g8=0.0
+  else
+    g1=${APPLIED[0]}; g2=${APPLIED[1]}; g3=${APPLIED[2]}; g4=${APPLIED[3]}
+    g5=${APPLIED[4]}; g6=${APPLIED[5]}; g7=${APPLIED[6]}; g8=${APPLIED[7]}
+  fi
   pw-cli s "$EQ_ID" Props \
-    "{ params = [ \"low_l:Gain\" $gl  \"low_r:Gain\" $gl \
-                  \"mid_l:Gain\" $gm  \"mid_r:Gain\" $gm \
-                  \"hi_l:Gain\"  $gh  \"hi_r:Gain\"  $gh ] }" >/dev/null 2>&1
+    "{ params = [ \"eq:Gain 1\" $g1  \"eq:Gain 2\" $g2  \"eq:Gain 3\" $g3  \"eq:Gain 4\" $g4 \
+                  \"eq:Gain 5\" $g5  \"eq:Gain 6\" $g6  \"eq:Gain 7\" $g7  \"eq:Gain 8\" $g8 ] }" \
+    >/dev/null 2>&1
+}
+
+# Ramp APPLIED -> GAINS in 0.25 dB / 30 ms steps to dodge biquad_set() history-reset clicks.
+# Operates on all bands in parallel; finishes when every band has reached its target.
+ramp_to_targets() {
+  if (( BYPASS )); then
+    # Bypass: jump straight (biquad already silent path-wise).
+    write_gains_now
+    return
+  fi
+  local step=0.25
+  local done_all=0
+  while (( ! done_all )); do
+    done_all=1
+    local i
+    for i in 0 1 2 3 4 5 6 7; do
+      local cur="${APPLIED[$i]}"
+      local tgt="${GAINS[$i]}"
+      # diff = tgt - cur; if |diff| <= step: snap to tgt; else step toward tgt.
+      local next
+      next=$(awk -v c="$cur" -v t="$tgt" -v s="$step" 'BEGIN{
+        d=t-c;
+        ad=(d<0)?-d:d;
+        if(ad<=s){printf "%.2f", t}
+        else if(d>0){printf "%.2f", c+s}
+        else{printf "%.2f", c-s}
+      }')
+      APPLIED[$i]="$next"
+      if [[ "$next" != "$tgt" ]]; then done_all=0; fi
+    done
+    write_gains_now
+    # 30 ms inter-step pause. Use printf 0 read trick? bash builtin sleep needs coreutils;
+    # ours has /bin/sleep supporting fractional seconds.
+    sleep 0.03
+  done
 }
 
 bar() {
-  # render -12..+12 dB as 24-cell bar
   local g="$1"
   awk -v g="$g" 'BEGIN{
     n=int(g+12+0.5); if(n<0)n=0; if(n>24)n=24;
@@ -158,57 +196,59 @@ bar() {
 ui() {
   clear
   cat <<EOF
-== Banks live EQ ==
+== Banks live EQ (param_eq, 8 bands, ramped) ==
   source: pink noise loop  (sink: banks_eq -> $PREV_DEFAULT_DESC)
   bypass: $([[ $BYPASS -eq 1 ]] && echo "ON  (signal flat)" || echo "off (EQ active)")
 
-  low  80 Hz   peaking      $(printf '%+5.1f dB ' "$GLOW")  [$(bar "$GLOW")]
-  mid   1 kHz  peaking      $(printf '%+5.1f dB ' "$GMID")  [$(bar "$GMID")]
-  hi   10 kHz  high-shelf   $(printf '%+5.1f dB ' "$GHI")   [$(bar "$GHI")]
-
-  keys:
-    low:  q/w  -1/+1 dB    a/s  -3/+3 dB    z  zero
-    mid:  e/r  -1/+1 dB    d/f  -3/+3 dB    x  zero
-    hi:   t/y  -1/+1 dB    g/h  -3/+3 dB    c  zero
-    presets:  1 flat    2 bass+    3 voice    4 treble+    5 V-shape
-    space: bypass toggle      0: zero all      Q/Ctrl-C: quit
 EOF
+  local i
+  for i in 0 1 2 3 4 5 6 7; do
+    printf "  [%d] %-10s  %+5.1f dB  [%s]\n" \
+      "$((i+1))" "${BAND_LABELS[$i]}" "${GAINS[$i]}" "$(bar "${GAINS[$i]}")"
+  done
+  cat <<'EOF'
+
+  band-select : 1..8 picks the active band
+  current band gain:
+        -/_   -1 dB        +/=   +1 dB
+        [     -3 dB        ]     +3 dB
+        \     zero this band
+
+  presets : F1 flat   F2 bass+   F3 voice   F4 treble+   F5 V-shape
+            (or shifted digits: ! @ # $ %)
+  space : bypass toggle      0 : zero ALL bands
+  q / Q / Ctrl-C : quit
+EOF
+  printf "\n  active band: [%d] %s\n" "$((SEL+1))" "${BAND_LABELS[$SEL]}"
 }
 
 clamp() {
   awk -v v="$1" 'BEGIN{ if(v>12)v=12; if(v<-12)v=-12; printf "%.1f", v }'
 }
 
-bump() {
-  # $1 = var name, $2 = delta (signed dB)
+bump_sel() {
+  # $1 = signed delta (dB), applied to the currently selected band.
   local cur new
-  case "$1" in
-    GLOW) cur=$GLOW;;
-    GMID) cur=$GMID;;
-    GHI)  cur=$GHI;;
-  esac
-  new=$(awk -v c="$cur" -v d="$2" 'BEGIN{printf "%.1f", c+d}')
+  cur=${GAINS[$SEL]}
+  new=$(awk -v c="$cur" -v d="$1" 'BEGIN{printf "%.1f", c+d}')
   new=$(clamp "$new")
-  case "$1" in
-    GLOW) GLOW=$new;;
-    GMID) GMID=$new;;
-    GHI)  GHI=$new;;
-  esac
+  GAINS[$SEL]=$new
 }
 
 preset() {
+  # 8-band presets — make them noticeably distinct.
+  # Bands: 60 LS, 150, 400, 1k, 2.5k, 6k, 10k, 15k HS
   case "$1" in
-    flat)     GLOW=0.0;  GMID=0.0;  GHI=0.0  ;;
-    bass)     GLOW=6.0;  GMID=0.0;  GHI=-1.0 ;;
-    voice)    GLOW=-3.0; GMID=4.0;  GHI=2.0  ;;
-    treble)   GLOW=-1.0; GMID=0.0;  GHI=6.0  ;;
-    vshape)   GLOW=5.0;  GMID=-4.0; GHI=5.0  ;;
+    flat)    GAINS=( 0.0  0.0  0.0  0.0  0.0  0.0  0.0  0.0) ;;
+    bass)    GAINS=( 6.0  4.0  1.0  0.0 -1.0 -1.0  0.0  1.0) ;;
+    voice)   GAINS=(-4.0 -2.0  1.0  4.0  4.0  2.0  0.0 -2.0) ;;
+    treble)  GAINS=(-1.0 -1.0  0.0  0.0  1.0  3.0  5.0  6.0) ;;
+    vshape)  GAINS=( 6.0  4.0  1.0 -3.0 -4.0 -1.0  3.0  6.0) ;;
   esac
   BYPASS=0
 }
 
-# Background streaming player. setsid so we can kill the whole process group
-# (python + pw-cat) cleanly.
+# Background streaming player.
 NOISE_PID=0
 start_noise() {
   setsid bash -c "python3 '$NOISE_GEN' | pw-cat -p - >/dev/null 2>&1" &
@@ -232,7 +272,6 @@ cleanup() {
     systemctl restart pipewire wireplumber
     echo "config removed, pipewire restarted"
     sleep 2
-    # Restore previous default by walking wpctl status for matching description.
     if [[ -n "$PREV_DEFAULT_DESC" ]]; then
       local id
       id=$(wpctl status | awk -v d="$PREV_DEFAULT_DESC" '
@@ -263,46 +302,53 @@ find_eq_id || { echo "filter-chain node missing"; exit 1; }
 wpctl set-default "$EQ_ID"
 echo "EQ node id=$EQ_ID set as default"
 
-apply_gains
+# Active band selector (0..7).
+SEL=3   # default cursor on 1 kHz
+
+# Initial write — already flat, but pushes APPLIED state to PipeWire.
+write_gains_now
 start_noise
 
 echo
 echo "press any key to start interactive loop (or Ctrl-C to abort)..."
 IFS= read -rsn1 _start
-# Interactive loop. Short read timeout so Ctrl-C is responsive even on busybox.
+
+# Interactive loop. Short read timeout so SIGINT / Ctrl-C lands fast.
 while :; do
   ui
-  if ! IFS= read -rsn1 -t 86400 key; then
+  if ! IFS= read -rsn1 -t 1 key; then
     continue
   fi
   case "$key" in
-    q) bump GLOW -1 ;;
-    w) bump GLOW +1 ;;
-    a) bump GLOW -3 ;;
-    s) bump GLOW +3 ;;
-    z) GLOW=0.0 ;;
+    q|Q) break ;;
 
-    e) bump GMID -1 ;;
-    r) bump GMID +1 ;;
-    d) bump GMID -3 ;;
-    f) bump GMID +3 ;;
-    x) GMID=0.0 ;;
+    # band selection
+    1) SEL=0 ;;
+    2) SEL=1 ;;
+    3) SEL=2 ;;
+    4) SEL=3 ;;
+    5) SEL=4 ;;
+    6) SEL=5 ;;
+    7) SEL=6 ;;
+    8) SEL=7 ;;
 
-    t) bump GHI -1 ;;
-    y) bump GHI +1 ;;
-    g) bump GHI -3 ;;
-    h) bump GHI +3 ;;
-    c) GHI=0.0 ;;
+    # gain on selected band
+    '-'|'_')  bump_sel -1 ;;
+    '+'|'=')  bump_sel +1 ;;
+    '[')      bump_sel -3 ;;
+    ']')      bump_sel +3 ;;
+    '\')      GAINS[$SEL]=0.0 ;;
 
-    1) preset flat ;;
-    2) preset bass ;;
-    3) preset voice ;;
-    4) preset treble ;;
-    5) preset vshape ;;
+    # presets — shifted digits, easy reach from band-select row
+    '!') preset flat ;;
+    '@') preset bass ;;
+    '#') preset voice ;;
+    '$') preset treble ;;
+    '%') preset vshape ;;
 
     ' ') BYPASS=$((1 - BYPASS)) ;;
-    0) GLOW=0.0; GMID=0.0; GHI=0.0; BYPASS=0 ;;
-    Q) break ;;
+    '0') GAINS=(0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0); BYPASS=0 ;;
+    *) continue ;;
   esac
-  apply_gains
+  ramp_to_targets
 done
