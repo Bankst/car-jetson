@@ -36,10 +36,10 @@ import signal
 import struct
 import subprocess
 import sys
-import termios
 import threading
 import time
-import tty
+# termios + tty are imported lazily inside run_ui() — the yocto python3
+# stdlib subset on our image does not always ship them.
 
 CARD = "APE"
 SR = 48000
@@ -183,48 +183,140 @@ def build_shift_blob():
 
 
 # ---------------------------------------------------------------------------
-# amixer drivers
+# libasound (ALSA control API) via ctypes.
+#
+# amixer's `cset` for INTEGER arrays writes only the first element — confirmed
+# experimentally against numid=1137 (PEQ Channel-N biquad gain params, 62-int
+# array) where every form of amixer invocation left RAM unchanged. The kernel
+# driver's put handler in tegra210_peq.c:tegra210_peq_ahub_ram_put expects all
+# N integers in ucontrol->value.integer.value[], so we need a proper
+# snd_ctl_elem_write() call. ctypes against libasound.so.2 gives us that with
+# no extra deps on the yocto image.
 # ---------------------------------------------------------------------------
-def amixer_cset(numid, value):
-    """value may be int, str, or iterable of ints (comma-joined for arrays)."""
-    if isinstance(value, (list, tuple)):
-        arg = ",".join(str(v) for v in value)
-    else:
-        arg = str(value)
-    r = subprocess.run(
-        ["amixer", "-c", CARD, "cset", f"numid={numid}", "--", arg],
-        capture_output=True, text=True
-    )
-    return r.returncode == 0, r.stderr
+import ctypes
+
+_asound = ctypes.CDLL("libasound.so.2")
+
+_asound.snd_ctl_open.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_char_p, ctypes.c_int]
+_asound.snd_ctl_open.restype = ctypes.c_int
+_asound.snd_ctl_close.argtypes = [ctypes.c_void_p]
+_asound.snd_ctl_close.restype = ctypes.c_int
+_asound.snd_ctl_elem_id_malloc.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+_asound.snd_ctl_elem_id_malloc.restype = ctypes.c_int
+_asound.snd_ctl_elem_id_free.argtypes = [ctypes.c_void_p]
+_asound.snd_ctl_elem_id_set_numid.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+_asound.snd_ctl_elem_id_set_name.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+_asound.snd_ctl_elem_id_set_interface.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_asound.snd_ctl_elem_value_malloc.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+_asound.snd_ctl_elem_value_malloc.restype = ctypes.c_int
+_asound.snd_ctl_elem_value_free.argtypes = [ctypes.c_void_p]
+_asound.snd_ctl_elem_value_set_id.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_asound.snd_ctl_elem_value_set_integer.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_long]
+_asound.snd_ctl_elem_value_set_boolean.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_long]
+_asound.snd_ctl_elem_value_set_enumerated.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
+_asound.snd_ctl_elem_write.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_asound.snd_ctl_elem_write.restype = ctypes.c_int
 
 
-def write_eq(gains_db):
+def _open_ctl(card_name=f"hw:{CARD}"):
+    ctl = ctypes.c_void_p()
+    rc = _asound.snd_ctl_open(ctypes.byref(ctl), card_name.encode(), 0)
+    if rc < 0:
+        raise OSError(f"snd_ctl_open({card_name}) -> {rc}")
+    return ctl
+
+
+def _build_elem_value(numid):
+    eid = ctypes.c_void_p()
+    if _asound.snd_ctl_elem_id_malloc(ctypes.byref(eid)) < 0:
+        raise MemoryError("snd_ctl_elem_id_malloc")
+    _asound.snd_ctl_elem_id_set_numid(eid, numid)
+    ev = ctypes.c_void_p()
+    if _asound.snd_ctl_elem_value_malloc(ctypes.byref(ev)) < 0:
+        _asound.snd_ctl_elem_id_free(eid)
+        raise MemoryError("snd_ctl_elem_value_malloc")
+    _asound.snd_ctl_elem_value_set_id(ev, eid)
+    return eid, ev
+
+
+def write_int_array(numid, values):
+    ctl = _open_ctl()
+    try:
+        eid, ev = _build_elem_value(numid)
+        try:
+            for i, v in enumerate(values):
+                _asound.snd_ctl_elem_value_set_integer(ev, i, int(v))
+            rc = _asound.snd_ctl_elem_write(ctl, ev)
+            return rc >= 0, rc
+        finally:
+            _asound.snd_ctl_elem_value_free(ev)
+            _asound.snd_ctl_elem_id_free(eid)
+    finally:
+        _asound.snd_ctl_close(ctl)
+
+
+def write_int_scalar(numid, value):
+    return write_int_array(numid, [int(value)])
+
+
+def write_bool(numid, on):
+    ctl = _open_ctl()
+    try:
+        eid, ev = _build_elem_value(numid)
+        try:
+            _asound.snd_ctl_elem_value_set_boolean(ev, 0, 1 if on else 0)
+            rc = _asound.snd_ctl_elem_write(ctl, ev)
+            return rc >= 0, rc
+        finally:
+            _asound.snd_ctl_elem_value_free(ev)
+            _asound.snd_ctl_elem_id_free(eid)
+    finally:
+        _asound.snd_ctl_close(ctl)
+
+
+# ---------------------------------------------------------------------------
+# Higher-level driver helpers
+# ---------------------------------------------------------------------------
+def write_eq(gains_db, currently_active=False):
+    """Write 8-band stereo PEQ coefficients to OPE1.
+
+    The PEQ RAM is write-locked while PEQ Active = on. Caller must
+    deactivate first (or pass currently_active=True and we'll do the
+    deactivate/restore dance). The keepalive stream must already be open
+    so OPE1 is DAPM-active; otherwise regmap writes silently no-op.
+    """
     blob = build_gain_blob(gains_db)
     shift = build_shift_blob()
-    ok0, _ = amixer_cset(NUMID["peq_gain_ch0"], blob)
-    ok1, _ = amixer_cset(NUMID["peq_gain_ch1"], blob)
-    amixer_cset(NUMID["peq_shift_ch0"], shift)
-    amixer_cset(NUMID["peq_shift_ch1"], shift)
+    if currently_active:
+        write_bool(NUMID["peq_active"], False)
+        time.sleep(0.01)  # let the DSP settle / RAM unlock
+    ok0, _ = write_int_array(NUMID["peq_gain_ch0"], blob)
+    ok1, _ = write_int_array(NUMID["peq_gain_ch1"], blob)
+    write_int_array(NUMID["peq_shift_ch0"], shift)
+    write_int_array(NUMID["peq_shift_ch1"], shift)
+    if currently_active:
+        time.sleep(0.01)
+        write_bool(NUMID["peq_active"], True)
     return ok0 and ok1
 
 
 def set_peq_active(on):
-    amixer_cset(NUMID["peq_active"], "on" if on else "off")
+    write_bool(NUMID["peq_active"], on)
 
 
 def set_peq_stages_active(n_active):
-    # Driver stores N-1 in PEQ_CONFIG_0[5:2]; ALSA control accepts 0..11
-    amixer_cset(NUMID["peq_stages"], n_active - 1)
+    # Driver stores N-1 in PEQ_CONFIG_0[5:2]; ALSA control accepts 0..11.
+    write_int_scalar(NUMID["peq_stages"], n_active - 1)
 
 
 def set_mvc_volume(int_val):
     int_val = max(0, min(16000, int_val))
-    amixer_cset(NUMID["mvc1_volume"], int_val)
+    write_int_scalar(NUMID["mvc1_volume"], int_val)
     return int_val
 
 
 def set_mvc_mute(on):
-    amixer_cset(NUMID["mvc1_mute"], "on" if on else "off")
+    write_bool(NUMID["mvc1_mute"], on)
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +335,105 @@ def write_max_wav_header(sr=SR, channels=2, bps=16):
                                 byte_rate, block_align, bps)
         + b"data" + struct.pack("<I", data_size)
     )
+
+
+class _PwCatStream:
+    """Spawn pw-cat with a streaming-WAV stdin pipe; feed from generator.
+    Goes through PipeWire to whichever sink is default — useful for audible
+    test signal (pink noise) but does NOT keep our AHUB OPE path energized
+    if PipeWire's default sink lives outside the AHUB graph (e.g. HDA)."""
+
+    def __init__(self, gen_factory):
+        self.gen_factory = gen_factory
+        self.proc = None
+        self.thr = None
+        self.stop_flag = threading.Event()
+
+    def start(self):
+        if self.proc:
+            return
+        self.stop_flag.clear()
+        self.proc = subprocess.Popen(
+            ["pw-cat", "-p", "-"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
+        )
+        self.proc.stdin.write(write_max_wav_header())
+        self.proc.stdin.flush()
+        self.thr = threading.Thread(target=self._feed, daemon=True)
+        self.thr.start()
+
+    def _feed(self):
+        gen = self.gen_factory()
+        buf = bytearray()
+        try:
+            while not self.stop_flag.is_set():
+                buf.clear()
+                for _ in range(1024):
+                    l, r = next(gen)
+                    buf += struct.pack("<hh", l, r)
+                self.proc.stdin.write(bytes(buf))
+                self.proc.stdin.flush()
+        except (BrokenPipeError, ValueError, OSError):
+            pass
+
+    def stop(self):
+        self.stop_flag.set()
+        if self.proc:
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                self.proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+            self.proc = None
+
+
+class Keepalive:
+    """Stream silence directly to hw:APE,0 (ADMAIF1) via aplay.
+
+    Tegra OPE pm_runtime suspends when no DAPM-active stream traverses it,
+    and PEQ RAM regmap writes to a suspended block silently no-op (the
+    kernel handler returns 0 but the writes don't reach silicon). Holding
+    a zero-filled stream open on ADMAIF1 keeps the ADMAIF1 -> MVC1 -> OPE1
+    -> I2S5 graph DAPM-active so live EQ writes actually land.
+
+    Routes around PipeWire entirely — pw-cat would target the default sink
+    which may be HDA (HDMI audio) and leave the AHUB graph suspended.
+    """
+
+    def __init__(self):
+        self.proc = None
+
+    def start(self):
+        if self.proc:
+            return
+        # `aplay -D hw:APE,0` opens pcm0p (ADMAIF1) directly. /dev/zero
+        # gives us silent S16 stereo PCM at any sample rate we ask for.
+        self.proc = subprocess.Popen(
+            ["aplay", "-q", "-D", "hw:APE,0",
+             "-f", "S16_LE", "-c", "2", "-r", str(SR),
+             "/dev/zero"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
+        )
+
+    def stop(self):
+        if self.proc:
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                self.proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+            self.proc = None
 
 
 def pink_sample_generator(sr=SR):
@@ -271,54 +462,9 @@ def pink_sample_generator(sr=SR):
         yield s16, s16
 
 
-class PinkNoise:
+class PinkNoise(_PwCatStream):
     def __init__(self):
-        self.proc = None
-        self.thr = None
-        self.stop_flag = threading.Event()
-
-    def start(self):
-        if self.proc:
-            return
-        self.stop_flag.clear()
-        self.proc = subprocess.Popen(
-            ["pw-cat", "-p", "-"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            preexec_fn=os.setsid,
-        )
-        self.proc.stdin.write(write_max_wav_header())
-        self.proc.stdin.flush()
-        self.thr = threading.Thread(target=self._feed, daemon=True)
-        self.thr.start()
-
-    def _feed(self):
-        gen = pink_sample_generator()
-        buf = bytearray()
-        try:
-            while not self.stop_flag.is_set():
-                buf.clear()
-                for _ in range(1024):
-                    l, r = next(gen)
-                    buf += struct.pack("<hh", l, r)
-                self.proc.stdin.write(bytes(buf))
-                self.proc.stdin.flush()
-        except (BrokenPipeError, ValueError, OSError):
-            pass
-
-    def stop(self):
-        self.stop_flag.set()
-        if self.proc:
-            try:
-                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                pass
-            try:
-                self.proc.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                pass
-            self.proc = None
+        super().__init__(pink_sample_generator)
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +528,8 @@ def read_key(timeout=1.0):
 
 
 def run_ui():
+    import termios
+    import tty
     state = {
         "cursor":      3,  # default at 1 kHz band
         "gains":       [0.0] * N_ACTIVE_BANDS,
@@ -394,9 +542,19 @@ def run_ui():
     }
     pink = PinkNoise()
 
+    # Spawn an inaudible silent keepalive stream BEFORE first EQ write.
+    # Tegra OPE pm_runtime suspends when no DAPM-active stream flows through
+    # it; PEQ RAM writes to a suspended block silently no-op (kernel handler
+    # returns 0 but regmap writes don't reach silicon). Keeping a zero-filled
+    # stream alive on ADMAIF1 keeps OPE energized so live EQ tweaks actually
+    # land. Verified empirically against 62-int sentinel-pattern writes.
+    keep = Keepalive()
+    keep.start()
+    time.sleep(0.25)  # let pcm0p reach RUNNING before first write
+
     # Establish HW state: stages = 8, write flat EQ, leave active=off
     set_peq_stages_active(N_ACTIVE_BANDS)
-    write_eq(state["gains"])
+    write_eq(state["gains"], state["peq_active"])
     set_mvc_volume(state["mvc_volume"])
 
     fd = sys.stdin.fileno()
@@ -418,29 +576,29 @@ def run_ui():
                 dirty = True
             elif k == "-":
                 state["gains"][state["cursor"]] -= GAIN_STEP_BIG
-                write_eq(state["gains"])
+                write_eq(state["gains"], state["peq_active"])
                 dirty = True
             elif k == "+" or k == "=":
                 state["gains"][state["cursor"]] += GAIN_STEP_BIG
-                write_eq(state["gains"])
+                write_eq(state["gains"], state["peq_active"])
                 dirty = True
             elif k == "[":
                 state["gains"][state["cursor"]] -= GAIN_STEP_SMALL
-                write_eq(state["gains"])
+                write_eq(state["gains"], state["peq_active"])
                 dirty = True
             elif k == "]":
                 state["gains"][state["cursor"]] += GAIN_STEP_SMALL
-                write_eq(state["gains"])
+                write_eq(state["gains"], state["peq_active"])
                 dirty = True
             elif k == "\\":
                 state["gains"][state["cursor"]] = 0.0
-                write_eq(state["gains"])
+                write_eq(state["gains"], state["peq_active"])
                 dirty = True
             elif k == "r":
                 state["gains"] = [0.0] * N_ACTIVE_BANDS
                 state["preset_name"] = "flat"
                 state["preset_idx"] = 0
-                write_eq(state["gains"])
+                write_eq(state["gains"], state["peq_active"])
                 dirty = True
             elif k == "b":
                 state["peq_active"] = not state["peq_active"]
@@ -461,7 +619,7 @@ def run_ui():
                 name = PRESET_ORDER[state["preset_idx"]]
                 state["preset_name"] = name
                 state["gains"] = list(PRESETS[name])
-                write_eq(state["gains"])
+                write_eq(state["gains"], state["peq_active"])
                 # Auto-activate when preset selected; flat is harmless
                 if not state["peq_active"]:
                     state["peq_active"] = True
@@ -484,6 +642,7 @@ def run_ui():
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
         pink.stop()
+        keep.stop()
         sys.stdout.write("\n")
         sys.stdout.flush()
 
