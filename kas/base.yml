@@ -40,6 +40,13 @@ local_conf_header:
     LICENSE_FLAGS_ACCEPTED = "commercial"
     ACCEPT_L4T_BINARIES = "1"
 
+  bbmask-frontend: |
+    # banks-frontend inherits qt6-cmake which only exists when meta-qt6
+    # is included (kiosk.yml / plasma.yml / future aa.yml). Mask it from
+    # the DE-agnostic base build so parse succeeds without the Qt layer.
+    # Qt-enabled kas variants override BBMASK to unmask it.
+    BBMASK = ".*/banks-frontend/.*"
+
   rootfs: |
     IMAGE_FSTYPES = "tegraflash"
     IMAGE_ROOTFS_EXTRA_SPACE = "1048576"
