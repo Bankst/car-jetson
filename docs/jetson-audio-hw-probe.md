@@ -9,8 +9,8 @@ Date: 2026-06-01. Target: `jetson-xavier-nx-banks-devkit`, image built from curr
 1. Set `amixer` mux routing to insert MVC1 + OPE1 between `ADMAIF1` and `I2S5`.
 2. Pick PEQ biquad stage count, upload coefficients per channel.
 3. Optionally enable MBDRC modes.
-4. Optionally route through `SPKPROT1` (Speaker Protection — independent AHUB endpoint).
-5. Optionally re-route through `ADSP-FE1/2` for `mp3-dec1` / `aac-dec1` / `aec` / `src` / `spkprot` plugin processing.
+4. ~~Optionally route through `SPKPROT1`~~ — **dead on R35.6.4**. No kernel driver binds the AHUB-side `nvidia,tegra210-spkprot` compatible, and the ADSP-side plugin is not in the static `adsp-fw.bin`. Routing through it = silent black hole. See `docs/speaker-protection-options.md`.
+5. ~~Re-route through `ADSP-FE1/2` for plugin processing~~ — **5 of 6 plugins are dead on R35.6.4**. Only `wire` (passthrough) actually loads. `mp3-dec1` / `aac-dec1` / `aec` / `src` / `spkprot` all return `Failed to init app` because dynamic ELF loading is gated by `nvidia,adsp_os_secload` and only `wire` was statically baked into the shipped `adsp-fw.bin`. See `docs/nvadsp-custom-plugin-feasibility.md` and `.planning/intel/jetson-xnx-trm/finding-adsp-plugins-live.md`.
 
 ## Hardware inventory (probed)
 
@@ -98,7 +98,7 @@ Single instance (`OPE1`). `OPE0` not enumerated — devkit silicon variant or DT
 | SPDIF | 1 | Digital output |
 | HDA / HDMI | separate card | Card 0, outside AHUB |
 
-### ADSP — Cortex-A9, already running
+### ADSP — Cortex-A9, OS running but plugins mostly dead
 
 ```
 [7.060710] nvadsp 2993000.adsp: in probe()...
@@ -109,18 +109,22 @@ Single instance (`OPE1`). `OPE0` not enumerated — devkit silicon variant or DT
 [7.490889] tegra210-adsp tegra210-adsp: Loaded app adma_tx
 ```
 
-ADSP OS firmware loaded out-of-band before kernel probe (QSPI / BPMP path — `/lib/firmware` empty of ADSP files). No firmware recipe needed.
+ADSP OS firmware (`adsp-fw.bin`, encrypted + signed) flashed into eMMC partition `adsp-fw` (not on rootfs). Loaded by BPMP/MB1 before kernel probe. No firmware recipe needed.
 
-#### Shipped ADSP plugins (registered as ALSA "param-type" entries)
+> **Correction (post-probe).** The 4 "Loaded app" lines above are framework helpers, **not** the 6 DT-declared plugins. Only `wire` of those 6 actually initialises when its mux is engaged. The other 5 all return `Failed to init app` because dynamic ELF loading is gated by `nvidia,adsp_os_secload` (set in `tegra194-soc-audio.dtsi`) and `app.c:317-321` blocks it; only WIRE was statically baked into the shipped `adsp-fw.bin`. See `docs/nvadsp-custom-plugin-feasibility.md` and `.planning/intel/jetson-xnx-trm/finding-adsp-plugins-live.md`.
 
-| Plugin | Use |
-|---|---|
-| `mp3-dec1` | HW-assisted MP3 decode |
-| `aac-dec1` | HW-assisted AAC decode |
-| `src` | Sample-rate conversion (supplemental to AHUB SFC) |
-| `spkprot` | **Speaker Protection** — peak/RMS limiter + DC blocker + thermal model |
-| `aec` | **Acoustic Echo Cancellation** — for hands-free / in-cab voice |
-| `wire` | Pass-through (template for custom plugins) |
+#### DT-declared ADSP plugins vs actual liveness
+
+| Plugin | Intended use | Live on R35.6.4? |
+|---|---|---|
+| `wire` | Pass-through | **YES** — only one that initialises |
+| `mp3-dec1` | HW-assisted MP3 decode | **NO** — fails to init |
+| `aac-dec1` | HW-assisted AAC decode | **NO** — fails to init |
+| `src` | Sample-rate conversion (supplemental to AHUB SFC) | **NO** — fails to init |
+| `spkprot` | Speaker protection | **NO** — fails to init; **also** AHUB-side endpoint has no kernel driver |
+| `aec` | Acoustic Echo Cancellation | **NO** — fails to init |
+
+Net: ADSP is unavailable for any real DSP work on this image. All DSP (room correction, AEC, speaker protection, codec offload) runs on Carmel A57-class cores via PipeWire / gstreamer / ffmpeg. The AHUB hardware blocks (MVC, OPE PEQ + MBDRC, MIXER, AMX/ADX, SFC, ASRC, AFC) remain fully usable.
 
 #### ADSP frontends
 
@@ -164,27 +168,34 @@ amixer -c APE cset numid=1156 dualband    # OPE1 MBDRC Mode = dualband
 
 PEQ coefficients per channel get uploaded via the `Channel-N biquad gain params` TLV. Format TBD by reading `sound/soc/tegra-alt/tegra210_ope_alt.c` — likely 5 × Q2.30 fixed-point words per stage (b0, b1, b2, a1, a2).
 
-## Speaker-protection HW path
-
-Independent AHUB endpoint. Can be chained:
+## Speaker-protection HW path — DEAD on R35.6.4
 
 ```text
-ADMAIF1 -> MVC1 -> OPE1 -> SPKPROT1 -> I2S5
+ADMAIF1 -> MVC1 -> OPE1 -> [SPKPROT1] -> I2S5      # do NOT route through SPKPROT1
 ```
 
-(Insert SPKPROT1 after EQ/DRC so amp sees post-EQ signal protected against thermal/clip events.)
+The SPKPROT1 AHUB endpoint is a black hole:
 
-The ADSP plugin `spkprot` is the implementation behind it — kernel routes SPKPROT1's data through the plugin on ADSP.
+- No kernel driver binds `nvidia,tegra210-spkprot` (searched `sound/soc/tegra/`, `tegra-alt/`, `nvidia/sound/soc/tegra-alt/`, `tegra-virt-alt/`).
+- TRM has no functional chapter for SPKPROT — only address-map entry. No register documentation, no silicon-side DSP.
+- Architectural intent (per `tegra-platforms-audio-dai-links.dtsi`) was for SPKPROT1 to ferry frames to the ADSP-side `nvspkprot.elf` plugin, which is not in the shipped `adsp-fw.bin` (per `finding-adsp-plugins-live.md`).
 
-## Convolution / room correction — gap
+Speaker protection must run in PipeWire on Carmel. See `docs/speaker-protection-options.md` for the recommended filter-chain (`bq_highpass` × 2 + CAPS LADSPA `Compress` + `clamp`).
 
-**Not shipped.** No `conv` / `convolver` / `fft` plugin in the ADSP loadout. Options when we get there:
+## Convolution / room correction — runs in PipeWire
 
-1. Use NVIDIA NvADSP SDK (in BSP `nv_tegra_release` tarball, not currently extracted) to write a partitioned-convolution plugin.
-2. Use `wire` plugin as template + CMSIS-DSP NEON / Cortex-A9 FFT routines.
-3. Avoid ADSP convolver entirely: approximate target IR with up to 12 biquads per channel in OPE PEQ. Adequate for tone-correction; inadequate for time-domain phase / room-mode nulling.
+Custom ADSP plugins are infeasible (see `docs/nvadsp-custom-plugin-feasibility.md`). PipeWire's builtin `convolver` filter runs on one Carmel core for stereo / 5.1 / 7.1 room-correction IRs:
 
-Decision deferred until P5+.
+| Config | Cost (est.) |
+|---|---|
+| 8k taps × 2 ch | 3–5 % of one Carmel core |
+| 8k taps × 6 ch (5.1) | ~9–15 % of one core |
+| 16k taps × 6 ch | ~18–30 % of one core |
+| 65k taps × 6 ch (~1.4 s IR) | starts spreading across cores |
+
+8k taps @ 48 kHz = 170 ms IR — adequate for cabin RT60 (~50–80 ms typical). Memory negligible (< 1 MB total). Latency one partition block (5–10 ms).
+
+A complementary cheap path: 12-biquad OPE PEQ per channel can fit a minimum-phase magnitude-only approximation of a measured IR (≤±1 dB up to ~5 kHz with `rePhase`-style biquad fitting). Free in silicon, but loses time-domain phase / room-mode nulling.
 
 ## Known cosmetic noise
 
@@ -200,11 +211,13 @@ Machine driver enumerates all ADSP FE/BE pairings; some unused ones throw `-32`.
 | Phase | Goal | Status |
 |---|---|---|
 | **P1 — probe** | Inventory HW + ADSP capability | **DONE** (this doc) |
-| **P2 — DT route + cset script** | Static cabin route at boot | Next |
-| **P3 — MVC + PEQ live tool** | `banks-audio-hw.sh` CLI, analog of `banks-eq-live.sh` | After P2 |
-| **P4 — MBDRC tuning** | Cabin-noise compressor calibrated, persistent | After P3 |
-| **P5 — SPKPROT enable** | Speaker protection inserted in route | Concurrent w/ P4 |
-| **P6 — ADSP `aec` for HFP** | Hands-free echo cancel for BT calling | After P5 |
-| **P7 — convolver plugin** | Mic-IR room correction | After P6 |
+| **P2 — boot-time cset** | Static cabin route at boot via `banks-audio-route` recipe | **DONE** (commits d03e22b, d5cd668) |
+| **P3 — MVC + PEQ live tool** | `banks-audio-hw.sh` CLI: live coefficient upload + ramped gain via `amixer` | Next |
+| **P4 — MBDRC tuning** | Cabin-noise compressor calibrated, persistent preset | After P3 |
+| ~~**P5 — SPKPROT enable**~~ | ~~HW speaker protection~~ | **CUT** — block is dead on R35.6.4; SW path via PipeWire instead (see `speaker-protection-options.md`) |
+| ~~**P6 — ADSP `aec` for HFP**~~ | ~~HW AEC for BT calling~~ | **CUT** — plugin dead; use `webrtc-audio-processing` in PipeWire |
+| **P5' — SW SP filter-chain** | PipeWire SP chain (`bq_highpass` × 2 + CAPS Compress + `clamp`) | After P4 |
+| **P6' — PipeWire upgrade to 1.4.10** | Gets `dcblock` + fftw-backed `convolver` + `ebur128` (see `pipewire-upgrade-feasibility.md`) | Concurrent w/ P5' |
+| **P7 — convolver room correction** | Mic-IR convolution in PipeWire (NOT ADSP) | After P6' |
 | **P8 — mic calibration tool** | UMIK-1 sweep → IR | After P7 |
-| **P9 — Qt integration** | `AudioMixer` (MVC) + `AudioEQ` (PEQ) + `AudioRoom` (conv) QObjects | After P3 (UI for what's live) |
+| **P9 — Qt integration** | `AudioMixer` (MVC) + `AudioEQ` (PEQ) + `AudioRoom` (convolver) QObjects | After P3 (UI for what's live) |
