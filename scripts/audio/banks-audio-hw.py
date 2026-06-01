@@ -527,9 +527,19 @@ def read_key(timeout=1.0):
     return "ESC"
 
 
+def _set_cbreak(fd):
+    """Inline tty.setcbreak — the yocto python3 stdlib subset on our image
+    ships termios but not the `tty` module wrappers."""
+    import termios
+    mode = termios.tcgetattr(fd)
+    mode[3] = mode[3] & ~(termios.ECHO | termios.ICANON)  # LFLAG
+    mode[6][termios.VMIN] = 1
+    mode[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSAFLUSH, mode)
+
+
 def run_ui():
     import termios
-    import tty
     state = {
         "cursor":      3,  # default at 1 kHz band
         "gains":       [0.0] * N_ACTIVE_BANDS,
@@ -560,7 +570,7 @@ def run_ui():
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
-        tty.setcbreak(fd)
+        _set_cbreak(fd)
         render(state)
         while True:
             k = read_key(0.5)
@@ -650,6 +660,10 @@ def run_ui():
 if __name__ == "__main__":
     if os.geteuid() != 0:
         print("banks-audio-hw: must run as root (amixer write to APE card)", file=sys.stderr)
+        sys.exit(1)
+    if not sys.stdin.isatty():
+        print("banks-audio-hw: stdin is not a terminal — UI requires a real tty.", file=sys.stderr)
+        print("                run from an interactive ssh session (no pipes / heredocs).", file=sys.stderr)
         sys.exit(1)
     try:
         run_ui()
