@@ -2,7 +2,7 @@
 
 **Status:** Design intent / wiring spec for handoff into larger project.
 **Date:** 2026-06-03
-**Scope:** Devkit-style breakout for the Cirrus Logic CS42448 6-in / 8-out audio codec, interfaced via 0.1" headers, with 3.5 mm TRS audio jacks. Operates in **TDM mode** as a pure clock slave.
+**Scope:** Devkit-style breakout for the Cirrus Logic CS42448 6-in / 8-out audio codec, interfaced via 0.1" headers, with 3.5 mm TRS audio jacks. Operates in **TDM mode** as a pure clock slave. Control over **I²C** (driven by the in-tree `cs42xx8` ASoC driver on the Jetson). Jetson 40-pin cable map in §3.4.
 
 ---
 
@@ -60,26 +60,30 @@ The host header is physically wired for multi-line I²S (multiple per-port clock
 
 > The original host mappings to SDIN2/SDIN3 and to codec-sourced BCLKO/LRCKO are **invalid in TDM** (SDIN2/3 unused; codec cannot output clocks as a slave) and are intentionally dropped.
 
-### 3.2 CN3 — Control Header (10-pin, SPI)
+### 3.2 CN3 — Control Header (10-pin, I²C)
 
-Control port. **SPI selected** (clean 1:1 map; I²C mode would strand AD0/AD1 address straps not present on this header). Brings signal + GND only — **no power** (VBUS unused).
+Control port. **I²C selected** — mandated by the Jetson software stack: the mainline `cs42xx8` ASoC driver provides only an I²C bus binding (`cs42xx8-i2c.c`, `CONFIG_SND_SOC_CS42XX8_I2C`, compatible `cirrus,cs42448`). There is **no SPI glue** in the kernel driver, so SPI would require writing/maintaining an out-of-tree regmap-SPI shim. I²C is the supported path.
+
+Mode select is by strap, not by host: **CS (pin 1) → GND selects I²C mode.** Address set by **AD0/AD1 straps → GND → I²C address 0x48** (both low). These pins were CS/CDIN in the abandoned SPI map; in I²C they are on-board address straps, not host-driven.
 
 | CN3 pin | Name | → Codec pin | Role |
 |--------:|------|-------------|------|
-| 1 | SCL2_M | NC | I²C alt (unused in SPI) |
+| 1 | SCL2_M | SCL/CCLK (63) | I²C clock |
 | 2 | NC | — | — |
-| 3 | SDA2_M | NC | I²C alt (unused in SPI) |
+| 3 | SDA2_M | SDA/CDOUT (64) | I²C data |
 | 4 | VBUS | **NC** | USB unused — do not connect |
-| 5 | MISO | SDA/CDOUT (64) | SPI data out (codec→host) |
+| 5 | MISO | NC | SPI-only (unused in I²C) |
 | 6 | EX_RST | RST# (3) | active-low reset |
-| 7 | SCLK | SCL/CCLK (63) | SPI clock |
-| 8 | MOSI | AD1/CDIN (2) | SPI data in (host→codec) |
-| 9 | SS | AD0/CS (1) | chip select (active low) |
+| 7 | SCLK | NC | SPI-only (unused in I²C) |
+| 8 | MOSI | NC | SPI-only — AD1 now on-board strap → GND |
+| 9 | SS | NC | SPI-only — AD0/CS now on-board strap → GND |
 | 10 | GND | GND | common ground |
 
-- No INT line on CN3 → codec INT (pin 61) left open; **poll status register 0x19** in firmware for clock-error/overflow.
+- **2 kΩ pull-ups on SCL + SDA to VLC (on-board 3V3).** Note: the Tegra gen2 I²C bus may carry on-module pull-ups; if present, omit the board pull-ups to avoid double-loading.
+- On-board straps required: **CS/pin1 → GND** (I²C mode), **AD0 → GND**, **AD1 → GND** (address 0x48).
+- No INT line on CN3 → codec INT (pin 61) left open. The cs42xx8 driver uses no IRQ, so this is correct — no status polling needed (driver-managed).
 - Confirm EX_RST is 3.3 V, active-low, push-pull. If open-drain, add pull-up to VLC.
-- I²C fallback (if ever needed): SCL2_M→pin63, SDA2_M→pin64, 2 kΩ pull-ups to VLC, and add on-board AD0/AD1 address straps.
+- SPI fallback (NOT used — would need out-of-tree driver): MISO→64, SCLK→63, MOSI→2, SS→1.
 
 ### 3.3 Audio Jacks — 3.5 mm TRS, line level
 
@@ -106,6 +110,41 @@ Per leg: `AOUTx+ → DC-block 4.7 µF → 560 Ω series → TRS`, shunt cap **�
 
 Per leg: `TRS → DC-block 1 µF → series R → AINx+`; AINx− → VQ reference (SE input filter, Fig 27). Set `ADC1/2/3_SINGLE` bits; AIN5/6 internal MUX = A.
 
+### 3.4 Jetson 40-pin cable (host ↔ board)
+
+Maps the **NVIDIA Xavier NX devkit P3509 40-pin header** (`jetson-xavier-nx-banks-devkit` MACHINE) to this board's I²S header + CN3. Tegra **I2S5** (DAP5) is the audio port and is the **clock master**; the codec is slave-only in TDM. Control is **gen2 I²C**.
+
+**Clocks + TDM data**
+
+| Signal | Jetson 40-pin | Board hdr | → codec |
+|---|---|---|---|
+| MCLK (AUD_MCLK) | **pin 7** | I²S **pin 4** (MCLK_OUT) | MCLK p10, 33 Ω series |
+| BCLK (I2S5) | **pin 12** | I²S **pin 6** (BCLK_O0) | DAC_SCLK18 / ADC_SCLK9 |
+| FS / LRCK (I2S5) | **pin 35** | I²S **pin 5** (LRCK_O0) | DAC_LRCK19 / ADC_LRCK5 |
+| Playback DOUT→codec | **pin 40** (I2S5 SDOUT) | I²S **pin 7** (SD_OUT0) | DAC_SDIN1 p17 |
+| Capture codec→DIN | **pin 38** (I2S5 SDIN) | I²S **pin 16** (SD_IN0) | ADC_SDOUT1 p13 — *deferred* |
+
+**Control (I²C gen2) + reset**
+
+| Signal | Jetson 40-pin | Board hdr | → codec |
+|---|---|---|---|
+| SDA | **pin 27** | CN3 **pin 3** (SDA2_M) | p64 SDA/CDOUT |
+| SCL | **pin 28** | CN3 **pin 1** (SCL2_M) | p63 SCL/CCLK |
+| RST# | **pin 29** (soc_gpio41_pq5) | CN3 **pin 6** (EX_RST) | RST# p3 |
+
+**Power + GND**
+
+| Signal | Jetson 40-pin | Board hdr |
+|---|---|---|
+| +5 V (sole supply) | **pin 2** (or 4) | I²S **pin 1** → VA + LDO in |
+| GND | 6 / 9 / 14 / 20 / 25 / 30 / 34 / 39 | I²S **pin 2 + 27**, CN3 **pin 10** |
+
+- **Board 3V3 is the on-board LDO** (VD/VLS/VLC) off the 5 V rail. **Do NOT drive board I²S pin 26 from the Jetson** — leave that wire off. Level match still holds: Jetson 40-pin logic 3.3 V ↔ board VLS/VLC 3.3 V, common GND, no shifter. I²C pull-ups go to the on-board VLC, not Jetson 3V3.
+- **MCLK net is the signal-integrity risk.** Keep the Jetson pin 7 → board pin 4 ribbon short; 33 Ω series board-side; flank with Jetson pin 6 GND. The DT `assigned-clock-rate` for AUD_MCLK **must equal the physically-wired rate** (24.576 MHz / 512× primary, 12.288 MHz / 256× fallback if SI is marginal) or `hw_params` fails / codec mis-clocks.
+- I2S5 full-duplex needs **both** pin 40 (out) + pin 38 (in) routed. Capture is deferred (playback-first) but wire pin 38 now to avoid a later rework.
+- **RST# = soc_gpio41_pq5 = pin 29** — confirm free in the devkit pinmux at the DT stage. Alternates: pin 31/32/33 = soc_gpio42/44/54.
+- Unused board nets: DAC_SDIN2-4, AUX_SDIN, ADC_SDOUT2/3 → pull to AGND / leave open per §8.
+
 ---
 
 ## 4. Power
@@ -122,7 +161,7 @@ GND: I²S-hdr pin2 + pin27, CN3 pin10 → all common (star ground at chip)
 
 - **VA = 5 V** (filtered) for best analog performance — do NOT run VA from the 3V3 LDO (3.3 V VA degrades SNR, datasheet Note 1).
 - One **low-noise 3V3 LDO** (LDO, not buck) feeds VD + VLS + VLC. 150–300 mA class sufficient.
-- Host logic = 3.3 V (header pin 26) → VLS/VLC match, **no level translation**.
+- 3V3 (VD/VLS/VLC) is **generated on-board by the LDO**, not taken from the host — board I²S pin 26 is **not** wired to the Jetson 3V3. Host logic (Jetson 40-pin) is also 3.3 V, so VLS/VLC match with common GND, **no level translation**.
 - **CN3 VBUS (pin 4) = NC.** USB connector, if populated, is mechanical only (D+/D− and VBUS all NC). Single supply source — no diode-OR / no contention.
 
 ### Decoupling (datasheet Fig 1)
@@ -155,17 +194,19 @@ GND: I²S-hdr pin2 + pin27, CN3 pin10 → all common (star ground at chip)
 
 ---
 
-## 6. Firmware Bring-up (SPI)
+## 6. Bring-up (I²C, kernel-driven)
 
-1. Bring rails up; ensure host MCLK + BCLK + LRCK are running and stable.
-2. Release `EX_RST` (RST#) high.
-3. SPI register writes:
-   - `MFREQ[2:0]` = host MCLK range.
-   - `DAC_FM` / `ADC_FM` = speed mode (Quad-Speed for 192 k — DAC trustworthy, ADC not guaranteed at QSM TDM).
-   - `DAC_DIF` / `ADC_DIF` = **TDM**.
-   - `ADC1/2/3_SINGLE` = 1 for single-ended inputs; AIN5/6 MUX = A.
-4. Set per-channel volumes; clear mutes.
-5. Poll status register 0x19 for clock-error / overflow (INT not wired).
+On the Jetson, register setup is **not** hand-written firmware — the in-tree `cs42xx8` ASoC driver does it from Device Tree. Bring-up is therefore: get clocks + DT right, the driver handles register programming over I²C.
+
+1. Bring the 5 V rail up; ensure host MCLK + BCLK + LRCK (Tegra I2S5, master) are running and stable.
+2. `EX_RST`/RST# driven by the `reset-gpios` DT property (soc_gpio41_pq5, pin 29) — driver de-asserts on probe.
+3. Driver programs over I²C (addr 0x48) from DT/ALSA:
+   - MCLK rate from the DT `assigned-clock-rate` on AUD_MCLK → `MFREQ` auto-selected to match MCLK/Fs ratio.
+   - format `dsp_a` + `bitclock-master`/`frame-master` on the I2S5 link → **TDM**, codec slave.
+   - speed mode from the runtime Fs (48 k → Single-Speed).
+   - `ADC1/2/3 Single Ended Mode Switch` kcontrol → SE inputs (set via `amixer`).
+4. Per-channel volumes / mutes via ALSA kcontrols (`DAC1-4 Playback Volume`, etc.).
+5. No status polling — driver uses no IRQ; INT (codec p61) is NC by design.
 
 ---
 
@@ -173,18 +214,19 @@ GND: I²S-hdr pin2 + pin27, CN3 pin10 → all common (star ground at chip)
 
 | Connector | Pins used | Carries |
 |-----------|-----------|---------|
-| I²S header | 1, 2, 4, 5, 6, 7, 16, 26, 27 | 5 V, GND, host MCLK/LRCK/BCLK, TDM play (SD_OUT0) + capture (SD_IN0), 3V3 ref |
-| CN3 (control) | 5, 6, 7, 8, 9, 10 | SPI (MISO/SCLK/MOSI/SS) + RST# + GND |
+| I²S header | 1, 2, 4, 5, 6, 7, 16, 27 | 5 V, GND, host MCLK/LRCK/BCLK, TDM play (SD_OUT0) + capture (SD_IN0) |
+| CN3 (control) | 1, 3, 6, 10 | I²C (SCL/SDA) + RST# + GND |
 | 3.5 mm × 7 | — | 3 stereo inputs, 4 stereo outputs (line level, SE) |
 
-- Single 5 V input (I²S pin 1); on-board 3V3 LDO; no on-board clock; codec configured over SPI (CN3); pure TDM slave.
+- Single 5 V input (I²S pin 1); on-board 3V3 LDO (pin 26 NOT host-driven); no on-board clock; codec configured over **I²C** (CN3, addr 0x48); pure TDM slave.
+- Jetson side: I2S5 on the P3509 40-pin header (master), gen2 I²C, RST# on soc_gpio41 (pin 29) — see §3.4.
 
 ---
 
 ## 8. Open Items / Confirm Before Layout
 
 1. **Host MCLK frequency + Fs** — actual value on I²S pin 4. Sets `MFREQ`, the 256/512× ratio, and bounds ribbon-jitter risk. **Primary open question.**
-2. **SPI vs I²C auto-detect** — confirm CS42448 control-port mode-select behavior (datasheet §4.7) for the chosen SPI wiring.
+2. **I²C mode straps** — confirm CS→GND mode-select + AD0/AD1→GND address straps (0x48) are present on-board (datasheet §4.7). SPI map abandoned (no kernel SPI driver).
 3. **EX_RST drive type/level** — confirm 3.3 V active-low push-pull; add VLC pull-up if open-drain.
 4. **Output/input RC filter component values** — worked cutoff math still to be finalized (currently nominal 560 Ω / 2.7 nF out; input R TBD).
 5. **Decoupling BOM** — to be expanded to full reference-designator list.
