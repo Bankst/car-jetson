@@ -42,23 +42,46 @@ DAC and ADC ports share one clock pair on this board: host BCLK/LRCK are bridged
 
 ### 3.1 I²S Header (host audio interface — used subset)
 
-The host header is physically wired for multi-line I²S (multiple per-port clocks + several 2-ch data lines). **For TDM only a small subset is used; all other pins are NC to the codec.**
+The host header is physically wired for multi-line I²S (multiple per-port clocks + several 2-ch data lines). **For TDM only a small subset is used; all other pins are NC to the codec.** Pin map below is **as-verified against the board schematic** — it supersedes the original design-intent draft, which mis-routed the capture data line and assumed the DAC/ADC clocks were already bridged at the header (they are not — see the bodge note).
 
 | Hdr pin | Header name | → Codec pin | Role |
 |--------:|-------------|-------------|------|
 | 1 | +5V | VA (via ferrite) + 3V3 LDO input | **Sole board 5 V supply** |
 | 2 | GND | GND | ground (also MCLK flank) |
 | 4 | MCLK_OUT | MCLK (pin 10), via 33 Ω series | **Host-sourced master clock** |
-| 5 | LRCK_O0 | DAC_LRCK (19) + ADC_LRCK (5), bridged | Fs frame start |
-| 6 | BCLK_O0 | DAC_SCLK (18) + ADC_SCLK (9), bridged | 256 × Fs bit clock |
+| 5 | LRCK_O0 | DAC_LRCK (19), via R9 | Fs frame start (DAC) |
+| 6 | BCLK_O0 | DAC_SCLK (18), via R14 | bit clock (DAC) |
 | 7 | SD_OUT0 | DAC_SDIN1 (17) | 8-ch TDM playback data |
-| 16 | SD_IN0 | ADC_SDOUT1 (13) | 6-ch (+2 aux) TDM capture data |
-| 26 | 3V3 | VLS/VLC level reference | host logic level (3.3 V) |
+| 17 | — | ADC_LRCK (5), via R4 | Fs frame start (ADC) — **needs bodge** |
+| 18 | — | ADC_SCLK (9), via R3 | bit clock (ADC) — **needs bodge** |
+| 19 | SDATA_IN0 | ADC_SDOUT1 (13) | 6-ch TDM capture data |
 | 27 | GND | GND | ground |
 
-**All other I²S-header pins → NC to codec:** LRCK_O1/O2, BCLK_O1/O2, BCLK_IN0..3, LRCK_IN1..3, SD_O1, SD_O3, SD_IN1/2/3, plus header NC pins.
+> **Note:** the on-board **3V3 (header pin 26) is NOT host-driven** — VLS/VLC come from the on-board LDO. Leave header pin 26 unwired (see §4).
+
+**Dead / unused header pins (NC to host for TDM):**
+- **pin 16 → DAC_SDIN4** — a *playback* data input; unused in TDM (all 8 DAC channels ride SDIN1 on pin 7). Do **not** wire it (the design-intent draft wrongly labelled this the capture line).
+- LRCK_O1/O2, BCLK_O1/O2, BCLK_IN0..3, LRCK_IN1..3, SD_O1, SD_O3, SD_IN1/2/3, plus header NC pins.
 
 > The original host mappings to SDIN2/SDIN3 and to codec-sourced BCLKO/LRCKO are **invalid in TDM** (SDIN2/3 unused; codec cannot output clocks as a slave) and are intentionally dropped.
+
+#### Clock bodge — bridge ADC clocks to DAC clocks
+
+The board does **not** bridge the DAC and ADC clock pairs; they land on separate header pins through separate series resistors. In TDM the codec needs the *same* BCLK/LRCK on both ports. Rather than run two extra host wires, bridge on-board (all four resistors accessible top-side):
+
+| Net | Codec pin | Series R (10 Ω) | Header pin |
+|---|---|---|---|
+| DAC_SCLK | 18 | **R14** | 6 |
+| DAC_LRCK | 19 | **R9**  | 5 |
+| ADC_SCLK | 9  | **R3**  | 18 |
+| ADC_LRCK | 5  | **R4**  | 17 |
+
+Each resistor sits `header pin —[R]— codec pin`. Bodge **header-side ↔ header-side** (the outer/source pads):
+
+- **Bodge wire 1:** R14 header-side (DAC_SCLK, the Jetson-driven node = header pin 6) → R3 header-side → through R3 10 Ω → ADC_SCLK (p9).
+- **Bodge wire 2:** R9 header-side (DAC_LRCK, driven = header pin 5) → R4 header-side → through R4 10 Ω → ADC_LRCK (p5).
+- Header-side, not codec-side: keeps each codec clock pin behind its **own** 10 Ω as series termination, and avoids tying the two codec pins directly (longer stub, ADC leg loses its term). Functionally this just bridges header 6↔18 and 5↔17 at the convenient top-side pads.
+- Result: host drives one BCLK/LRCK pair (header pins 6/5); ADC clocks follow. Header pins 17/18 need no host wire. Keep both bodge wires short — single driver now forks to two loads at ~12.288 MHz.
 
 ### 3.2 CN3 — Control Header (10-pin, I²C)
 
@@ -112,38 +135,32 @@ Per leg: `TRS → DC-block 1 µF → series R → AINx+`; AINx− → VQ referen
 
 ### 3.4 Jetson 40-pin cable (host ↔ board)
 
-Maps the **NVIDIA Xavier NX devkit P3509 40-pin header** (`jetson-xavier-nx-banks-devkit` MACHINE) to this board's I²S header + CN3. Tegra **I2S5** (DAP5) is the audio port and is the **clock master**; the codec is slave-only in TDM. Control is **gen2 I²C**.
+Maps the **NVIDIA Xavier NX devkit P3509 40-pin header** (`jetson-xavier-nx-banks-devkit` MACHINE) to this board's I²S header + CN3. Tegra **I2S5** (DAP5) is the audio port and is the **clock master**; the codec is slave-only in TDM. Control is **gen2 I²C**. Pins below are schematic-verified (see §3.1).
 
-**Clocks + TDM data**
+**10-wire harness (one colour per host net):**
 
-| Signal | Jetson 40-pin | Board hdr | → codec |
-|---|---|---|---|
-| MCLK (AUD_MCLK) | **pin 7** | I²S **pin 4** (MCLK_OUT) | MCLK p10, 33 Ω series |
-| BCLK (I2S5) | **pin 12** | I²S **pin 6** (BCLK_O0) | DAC_SCLK18 / ADC_SCLK9 |
-| FS / LRCK (I2S5) | **pin 35** | I²S **pin 5** (LRCK_O0) | DAC_LRCK19 / ADC_LRCK5 |
-| Playback DOUT→codec | **pin 40** (I2S5 SDOUT) | I²S **pin 7** (SD_OUT0) | DAC_SDIN1 p17 |
-| Capture codec→DIN | **pin 38** (I2S5 SDIN) | I²S **pin 16** (SD_IN0) | ADC_SDOUT1 p13 — *deferred* |
+| Wire | Signal | Jetson 40-pin | Board hdr pin | → codec pin | Note |
+|---|---|---|---|---|---|
+| **red** | +5 V | 2 (or 4) | I²S 1 | VA + LDO in | sole supply |
+| **blk** | GND | 6/9/14/20/25/30/34/39 | I²S 2, I²S 27, CN3 10 | GND | star at chip |
+| **org** | MCLK | 7 (AUD_MCLK) | I²S 4 | 10 | 33 Ω, SI-critical |
+| **yel** | BCLK | 12 (I2S5) | I²S 6 | DAC_SCLK 18 (R14) | → ADC_SCLK 9 (R3) via bodge |
+| **grn** | FS/LRCK | 35 (I2S5) | I²S 5 | DAC_LRCK 19 (R9) | → ADC_LRCK 5 (R4) via bodge |
+| **blu** | SDOUT play | 40 (I2S5 SDOUT) | I²S 7 | DAC_SDIN1 17 | 8-ch TDM out |
+| **vio** | SDIN cap | 38 (I2S5 SDIN) | I²S 19 (SDATA_IN0) | ADC_SDOUT1 13 | 6-ch TDM in — *deferred* |
+| **wht** | SCL | 28 | CN3 1 | 63 | 2 kΩ → VLC |
+| **gry** | SDA | 27 | CN3 3 | 64 | 2 kΩ → VLC |
+| **brn** | RST# | 29 (soc_gpio41_pq5) | CN3 6 | 3 | active-low |
 
-**Control (I²C gen2) + reset**
+10 colours = 10 host nets exactly. Colour logic: red/blk = power; org→vio (warm→cool) = the 5-wire I2S5 audio bus; wht/gry/brn = control. (Classic I²C SCL=yel/SDA=grn skipped — those are on the clock lines; keeping the audio bus one colour family wins.)
 
-| Signal | Jetson 40-pin | Board hdr | → codec |
-|---|---|---|---|
-| SDA | **pin 27** | CN3 **pin 3** (SDA2_M) | p64 SDA/CDOUT |
-| SCL | **pin 28** | CN3 **pin 1** (SCL2_M) | p63 SCL/CCLK |
-| RST# | **pin 29** (soc_gpio41_pq5) | CN3 **pin 6** (EX_RST) | RST# p3 |
-
-**Power + GND**
-
-| Signal | Jetson 40-pin | Board hdr |
-|---|---|---|
-| +5 V (sole supply) | **pin 2** (or 4) | I²S **pin 1** → VA + LDO in |
-| GND | 6 / 9 / 14 / 20 / 25 / 30 / 34 / 39 | I²S **pin 2 + 27**, CN3 **pin 10** |
-
-- **Board 3V3 is the on-board LDO** (VD/VLS/VLC) off the 5 V rail. **Do NOT drive board I²S pin 26 from the Jetson** — leave that wire off. Level match still holds: Jetson 40-pin logic 3.3 V ↔ board VLS/VLC 3.3 V, common GND, no shifter. I²C pull-ups go to the on-board VLC, not Jetson 3V3.
-- **MCLK net is the signal-integrity risk.** Keep the Jetson pin 7 → board pin 4 ribbon short; 33 Ω series board-side; flank with Jetson pin 6 GND. The DT `assigned-clock-rate` for AUD_MCLK **must equal the physically-wired rate** (24.576 MHz / 512× primary, 12.288 MHz / 256× fallback if SI is marginal) or `hw_params` fails / codec mis-clocks.
-- I2S5 full-duplex needs **both** pin 40 (out) + pin 38 (in) routed. Capture is deferred (playback-first) but wire pin 38 now to avoid a later rework.
+- **Capture data is header pin 19** (SDATA_IN0 → ADC_SDOUT1 p13), **not** pin 16. Header **pin 16 = DAC_SDIN4 = dead in TDM** — do not wire.
+- **ADC clocks reach the codec via the on-board bodge** (R14→R3, R9→R4 — see §3.1). With the bodge in place the host drives only BCLK (I²S 6) + FS (I²S 5); header pins 17/18 take no host wire.
+- **Board 3V3 is the on-board LDO** (VD/VLS/VLC). **Do NOT drive board I²S pin 26 from the Jetson.** Level match still holds (Jetson logic 3.3 V ↔ VLS/VLC 3.3 V, common GND, no shifter). I²C pull-ups go to on-board VLC.
+- **MCLK net is the signal-integrity risk.** Keep the Jetson pin 7 → board pin 4 ribbon short; 33 Ω series board-side; flank with Jetson pin 6 GND. The DT `assigned-clock-rate` for AUD_MCLK **must equal the physically-wired rate** (24.576 MHz / 512× primary, 12.288 MHz / 256× fallback) or `hw_params` fails / codec mis-clocks.
+- I2S5 full-duplex needs **both** pin 40 (out) + pin 38 (in). Capture is deferred (playback-first) but wire the **vio** leg + do the bodge now to avoid later rework.
 - **RST# = soc_gpio41_pq5 = pin 29** — confirm free in the devkit pinmux at the DT stage. Alternates: pin 31/32/33 = soc_gpio42/44/54.
-- Unused board nets: DAC_SDIN2-4, AUX_SDIN, ADC_SDOUT2/3 → pull to AGND / leave open per §8.
+- Unused board nets: DAC_SDIN2-4 (incl. pin-16 line), AUX_SDIN, ADC_SDOUT2/3 → pull to AGND / leave open per §8.
 
 ---
 
@@ -214,12 +231,13 @@ On the Jetson, register setup is **not** hand-written firmware — the in-tree `
 
 | Connector | Pins used | Carries |
 |-----------|-----------|---------|
-| I²S header | 1, 2, 4, 5, 6, 7, 16, 27 | 5 V, GND, host MCLK/LRCK/BCLK, TDM play (SD_OUT0) + capture (SD_IN0) |
+| I²S header | 1, 2, 4, 5, 6, 7, 19, 27 | 5 V, GND, host MCLK/LRCK/BCLK, TDM play (SD_OUT0, pin 7) + capture (SDATA_IN0, pin 19) |
 | CN3 (control) | 1, 3, 6, 10 | I²C (SCL/SDA) + RST# + GND |
 | 3.5 mm × 7 | — | 3 stereo inputs, 4 stereo outputs (line level, SE) |
 
 - Single 5 V input (I²S pin 1); on-board 3V3 LDO (pin 26 NOT host-driven); no on-board clock; codec configured over **I²C** (CN3, addr 0x48); pure TDM slave.
-- Jetson side: I2S5 on the P3509 40-pin header (master), gen2 I²C, RST# on soc_gpio41 (pin 29) — see §3.4.
+- **Capture data = I²S pin 19** (not 16; pin 16 = unused DAC_SDIN4). **ADC clocks reach the codec via on-board bodge** R14→R3 / R9→R4 (§3.1) — host drives a single BCLK/LRCK pair.
+- Jetson side: I2S5 on the P3509 40-pin header (master), gen2 I²C, RST# on soc_gpio41 (pin 29) — 10-wire colour-coded harness in §3.4.
 
 ---
 
@@ -231,7 +249,8 @@ On the Jetson, register setup is **not** hand-written firmware — the in-tree `
 4. **Output/input RC filter component values** — worked cutoff math still to be finalized (currently nominal 560 Ω / 2.7 nF out; input R TBD).
 5. **Decoupling BOM** — to be expanded to full reference-designator list.
 6. **Header NC pin 3 → GND strap** for MCLK flanking — confirm header pad is controllable.
-7. **AUX_SDIN / DAC_SDIN2-4 / ADC_SDOUT2-3** — pull unused inputs (DAC_SDIN2-4, AUX_SDIN) to AGND; leave unused outputs open.
+7. **AUX_SDIN / DAC_SDIN2-4 / ADC_SDOUT2-3** — pull unused inputs (DAC_SDIN2-4, AUX_SDIN) to AGND; leave unused outputs open. Note DAC_SDIN4 lands on header pin 16 — leave that header pin unwired.
+8. **Clock bodge (capture only)** — R14→R3 (BCLK→ADC_SCLK) and R9→R4 (FS→ADC_LRCK), header-side pads, top of board (§3.1). Required before any capture bring-up; playback works without it. Skip if capture stays deferred.
 
 ---
 
