@@ -26,6 +26,9 @@ bool NvdecVideoOutput::init() {
 
 void NvdecVideoOutput::write(aasdk::messenger::Timestamp::ValueType,
                               const aasdk::common::DataConstBuffer& buffer) {
+    static int count = 0;
+    if (++count <= 5 || count % 300 == 0)
+        OPENAUTO_LOG(info) << "[NvdecVideoOutput] write #" << count << " size=" << buffer.size;
     m_decoder->feedNalUnit(buffer.cdata, buffer.size);
 }
 

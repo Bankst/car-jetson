@@ -34,8 +34,10 @@ DEPENDS = " \
 "
 
 # GPS passthrough for Android Auto navigation (optional)
-PACKAGECONFIG ??= "gps"
+# NVDEC: hardware H264 decode via NVIDIA V4L2 API on Jetson
+PACKAGECONFIG ??= "gps nvdec"
 PACKAGECONFIG[gps] = "-DBANKS_AA_GPS=ON,-DBANKS_AA_GPS=OFF,gpsd"
+PACKAGECONFIG[nvdec] = "-DBANKS_AA_NVDEC=ON,-DBANKS_AA_NVDEC=OFF,tegra-mmapi v4l-utils tegra-libraries-multimedia-utils tegra-libraries-multimedia,tegra-libraries-multimedia-v4l tegra-libraries-multimedia-utils tegra-libraries-multimedia libv4l"
 
 # Point CMake FetchContent at the pre-fetched source directories so it never
 # hits the network during do_configure / do_compile.

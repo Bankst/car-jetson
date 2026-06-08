@@ -200,12 +200,23 @@ else()
     message(STATUS "Android Auto GPS: disabled (install gpsd-devel to enable)")
 endif()
 
+# --- NVDEC hardware decode (Jetson only) ---
+option(BANKS_AA_NVDEC "Use NVIDIA NVDEC V4L2 hardware decode instead of ffmpeg" OFF)
+
 # --- System deps (remaining) ---
 pkg_check_modules(PIPEWIRE  REQUIRED IMPORTED_TARGET libpipewire-0.3)
 pkg_check_modules(SYSTEMD   REQUIRED IMPORTED_TARGET libsystemd)
-pkg_check_modules(AVCODEC   REQUIRED IMPORTED_TARGET libavcodec)
+if(NOT BANKS_AA_NVDEC)
+    pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
+endif()
 pkg_check_modules(AVUTIL    REQUIRED IMPORTED_TARGET libavutil)
 pkg_check_modules(SWSCALE   REQUIRED IMPORTED_TARGET libswscale)
+
+if(BANKS_AA_NVDEC)
+    pkg_check_modules(LIBV4L2 REQUIRED IMPORTED_TARGET libv4l2)
+    find_library(NVBUFSURFACE_LIB nvbufsurface REQUIRED)
+    find_library(NVBUFSURFTRANSFORM_LIB nvbufsurftransform REQUIRED)
+endif()
 
 # --- App ---
 qt_add_executable(banks-frontend
@@ -270,6 +281,7 @@ qt_add_qml_module(banks-frontend
 
 target_compile_definitions(banks-frontend PRIVATE
     BANKS_FRONTEND_PRESET_PATH="${CMAKE_INSTALL_FULL_DATADIR}/banks-frontend/presets"
+    $<$<BOOL:${BANKS_AA_NVDEC}>:BANKS_AA_NVDEC>
 )
 
 target_link_libraries(banks-frontend PRIVATE
@@ -281,9 +293,12 @@ target_link_libraries(banks-frontend PRIVATE
     openauto-core
     PkgConfig::PIPEWIRE
     PkgConfig::SYSTEMD
-    PkgConfig::AVCODEC
+    $<$<NOT:$<BOOL:${BANKS_AA_NVDEC}>>:PkgConfig::AVCODEC>
     PkgConfig::AVUTIL
     PkgConfig::SWSCALE
+    $<$<BOOL:${BANKS_AA_NVDEC}>:PkgConfig::LIBV4L2>
+    $<$<BOOL:${BANKS_AA_NVDEC}>:${NVBUFSURFACE_LIB}>
+    $<$<BOOL:${BANKS_AA_NVDEC}>:${NVBUFSURFTRANSFORM_LIB}>
     Threads::Threads
 )
 
