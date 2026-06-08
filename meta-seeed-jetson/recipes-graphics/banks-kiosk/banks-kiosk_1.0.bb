@@ -15,13 +15,16 @@ SRC_URI = " \
     file://triggerhappy-override.conf \
     file://banks-media-player \
     file://kiosk-media-shell \
+    file://kiosk-rdp \
 "
 
 S = "${WORKDIR}"
 
 inherit systemd
 
-RDEPENDS:${PN} = "bash python3-core python3-curses dbus"
+# ydotool: uinput injector used by kiosk-rdp to trigger weston screen-share.
+# openssl: kiosk-rdp generates the RDP TLS cert on first use.
+RDEPENDS:${PN} = "bash python3-core python3-curses dbus ydotool openssl-bin"
 
 SYSTEMD_SERVICE:${PN} = "kiosk.service"
 SYSTEMD_AUTO_ENABLE = "enable"
@@ -36,6 +39,7 @@ do_install() {
 
     install -d ${D}${bindir}
     install -m 0755 ${WORKDIR}/banks-media-player ${D}${bindir}/banks-media-player
+    install -m 0755 ${WORKDIR}/kiosk-rdp          ${D}${bindir}/kiosk-rdp
     install -m 0755 ${WORKDIR}/toggle-desktop-mode ${D}${sysconfdir}/kiosk/toggle-desktop-mode
 
     install -d ${D}${sysconfdir}/triggerhappy/triggers.d
@@ -57,4 +61,5 @@ FILES:${PN} = " \
     ${systemd_system_unitdir}/triggerhappy.service.d/override.conf \
     /var/lib/kiosk \
     ${bindir}/banks-media-player \
+    ${bindir}/kiosk-rdp \
 "
