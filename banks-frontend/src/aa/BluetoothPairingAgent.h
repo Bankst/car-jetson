@@ -39,6 +39,8 @@ public:
     QString deviceName() const { return m_deviceName; }
     QString passkey() const { return m_passkey; }
 
+    void setAutoAcceptForAA(bool enabled) { m_autoAcceptAA = enabled; }
+
 signals:
     /// Emitted on the GUI thread when BlueZ sends RequestConfirmation.
     void confirmationRequested(const QString& device, const QString& passkey);
@@ -90,6 +92,7 @@ private:
     QString m_deviceName;
     QString m_passkey;
     QDBusMessage m_pendingReply;
+    bool m_autoAcceptAA = false;
 
     static constexpr int kTimeoutMs = 30000;
     static constexpr const char* kAgentPath = "/banks/agent";

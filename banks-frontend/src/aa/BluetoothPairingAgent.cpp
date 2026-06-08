@@ -177,10 +177,17 @@ bool BluetoothPairingAgent::handleConfirmation(const QDBusObjectPath& device,
     m_deviceName = name;
     m_passkey = pin;
 
+    if (m_autoAcceptAA) {
+        OPENAUTO_LOG(info) << "[BTPairingAgent] AA-initiated pairing from "
+                           << name.toStdString() << " — auto-accepting";
+        m_bus.send(m_pendingReply.createReply());
+        emit pairingComplete(name, true);
+        return true;
+    }
+
     setPairingPending(true);
     emit confirmationRequested(name, pin);
 
-    // Auto-reject after timeout
     QTimer::singleShot(kTimeoutMs, this, [this]{
         if (m_pairingPending) {
             OPENAUTO_LOG(warning) << "[BTPairingAgent] confirmation timed out — rejecting";
@@ -188,7 +195,6 @@ bool BluetoothPairingAgent::handleConfirmation(const QDBusObjectPath& device,
         }
     });
 
-    // Return immediately — reply sent later by confirmPairing()
     OPENAUTO_LOG(info) << "[BTPairingAgent] confirmation dialog shown for "
                        << name.toStdString();
     return true;

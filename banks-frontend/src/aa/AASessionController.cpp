@@ -202,6 +202,7 @@ void AASessionController::setStatus(const QString& s) {
 void AASessionController::setConnected(bool c) {
     if (m_connected != c) {
         m_connected = c;
+        if (m_pairingAgent) m_pairingAgent->setAutoAcceptForAA(c);
         OPENAUTO_LOG(info) << "[AASessionController] connected -> " << c;
         emit connectedChanged();
     }

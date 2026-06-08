@@ -14,7 +14,6 @@ AAVideoItem::AAVideoItem(QQuickItem* parent)
     : QQuickItem(parent) {
     setFlag(ItemHasContents, true);
     setAcceptedMouseButtons(Qt::LeftButton);
-    setAcceptTouchEvents(true);
 }
 
 AAVideoItem::~AAVideoItem() {

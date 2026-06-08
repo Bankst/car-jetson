@@ -1,11 +1,18 @@
 #include "NvdecVideoOutput.h"
 #include "AAVideoDecoder.h"
 #include <f1x/openauto/Common/Log.hpp>
+#include <QSettings>
 
 namespace aa {
 
 NvdecVideoOutput::NvdecVideoOutput(int width, int height, std::shared_ptr<AAVideoDecoder> decoder)
-    : m_width(width), m_height(height), m_decoder(std::move(decoder)) {}
+    : m_width(width), m_height(height), m_decoder(std::move(decoder))
+{
+    QSettings cfg("/etc/banks-frontend/aa.conf", QSettings::IniFormat);
+    m_dpi = cfg.value("video/dpi", 140).toInt();
+    m_resolution = cfg.value("video/resolution", 1080).toInt();
+    OPENAUTO_LOG(info) << "[NvdecVideoOutput] config: dpi=" << m_dpi << " resolution=" << m_resolution;
+}
 
 bool NvdecVideoOutput::open() {
     OPENAUTO_LOG(info) << "[NvdecVideoOutput] open " << m_width << "x" << m_height;
@@ -34,11 +41,18 @@ NvdecVideoOutput::getVideoFPS() const {
 
 aap_protobuf::service::media::sink::message::VideoCodecResolutionType
 NvdecVideoOutput::getVideoResolution() const {
-    return aap_protobuf::service::media::sink::message::VideoCodecResolutionType::VIDEO_1920x1080;
+    using R = aap_protobuf::service::media::sink::message::VideoCodecResolutionType;
+    switch (m_resolution) {
+    case 480:  return R::VIDEO_800x480;
+    case 720:  return R::VIDEO_1280x720;
+    case 1440: return R::VIDEO_2560x1440;
+    case 2160: return R::VIDEO_3840x2160;
+    default:   return R::VIDEO_1920x1080;
+    }
 }
 
 size_t NvdecVideoOutput::getScreenDPI() const {
-    return 140;
+    return m_dpi;
 }
 
 QRect NvdecVideoOutput::getVideoMargins() const {

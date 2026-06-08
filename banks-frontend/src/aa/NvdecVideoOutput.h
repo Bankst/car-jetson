@@ -25,6 +25,8 @@ public:
 private:
     int m_width;
     int m_height;
+    int m_dpi = 140;
+    int m_resolution = 1080;
     std::shared_ptr<AAVideoDecoder> m_decoder;
 };
 
