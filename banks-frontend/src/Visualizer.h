@@ -8,6 +8,7 @@
 class AudioCapture;
 class AudioRingConsumer;
 class Favorites;
+class PresetPreloader;
 class VisualizerRenderer;
 
 class Visualizer : public QQuickFramebufferObject {
@@ -24,6 +25,7 @@ class Visualizer : public QQuickFramebufferObject {
     Q_PROPERTY(float sensitivity READ sensitivity WRITE setSensitivity NOTIFY sensitivityChanged)
     Q_PROPERTY(int presetDuration READ presetDuration WRITE setPresetDuration NOTIFY presetDurationChanged)
     Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
+    Q_PROPERTY(int preloadDepth READ preloadDepth WRITE setPreloadDepth NOTIFY preloadDepthChanged)
 
 public:
     explicit Visualizer(QQuickItem* parent = nullptr);
@@ -50,6 +52,8 @@ public:
     void    setPresetDuration(int secs);
     bool    active() const { return m_active; }
     void    setActive(bool v) { if (v != m_active) { m_active = v; emit activeChanged(); if (v) update(); } }
+    int     preloadDepth() const { return m_preloadDepth; }
+    void    setPreloadDepth(int depth);
 
     Q_INVOKABLE void next();
     Q_INVOKABLE void prev();
@@ -74,6 +78,7 @@ signals:
     void sensitivityChanged();
     void presetDurationChanged();
     void activeChanged();
+    void preloadDepthChanged();
 
 protected:
     void itemChange(ItemChange change, const ItemChangeData& data) override;
@@ -95,11 +100,12 @@ private:
     std::unique_ptr<AudioRingConsumer> m_audioRing;
 
     // Command queue consumed in renderer's synchronize().
-    enum class Cmd { None, Next, Prev, ShuffleOn, ShuffleOff, ReloadPlaylist, SetFavoritesMode, LockOn, LockOff, SetSensitivity, SetPresetDuration };
+    enum class Cmd { None, Next, Prev, ShuffleOn, ShuffleOff, ReloadPlaylist, SetFavoritesMode, LockOn, LockOff, SetSensitivity, SetPresetDuration, SetPreloadDepth };
     std::vector<Cmd> m_pendingCmds;
     QStringList m_pendingFavoritesList;  // payload for SetFavoritesMode
     bool        m_pendingFavoritesOn = false;
     float       m_pendingSensitivity = 1.0f;
     int         m_pendingPresetDuration = 30;
     bool        m_active = true;
+    int         m_preloadDepth = 3;
 };

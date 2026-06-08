@@ -2,6 +2,7 @@
 #include "AudioCapture.h"
 #include "AudioRingConsumer.h"
 #include "Favorites.h"
+#include "PresetPreloader.h"
 #include "Log.h"
 
 #include <QCoreApplication>
@@ -34,6 +35,8 @@ public:
 
     ~VisualizerRenderer() override {
         qCInfo(logViz) << "Renderer dtor";
+        delete m_preloader;
+        m_preloader = nullptr;
         if (m_playlist) projectm_playlist_destroy(m_playlist);
         if (m_pm)       projectm_destroy(m_pm);
     }
@@ -58,8 +61,14 @@ public:
                     projectm_playlist_play_next(m_playlist, true); break;
                 case Visualizer::Cmd::Prev:
                     projectm_playlist_play_previous(m_playlist, true); break;
-                case Visualizer::Cmd::ShuffleOn:  projectm_playlist_set_shuffle(m_playlist, true);  break;
-                case Visualizer::Cmd::ShuffleOff: projectm_playlist_set_shuffle(m_playlist, false); break;
+                case Visualizer::Cmd::ShuffleOn:
+                    projectm_playlist_set_shuffle(m_playlist, true);
+                    if (m_preloader) m_preloader->clear();
+                    break;
+                case Visualizer::Cmd::ShuffleOff:
+                    projectm_playlist_set_shuffle(m_playlist, false);
+                    if (m_preloader) m_preloader->clear();
+                    break;
                 case Visualizer::Cmd::LockOn:  projectm_set_preset_locked(m_pm, true);  qCInfo(logViz) << "preset locked";   break;
                 case Visualizer::Cmd::LockOff: projectm_set_preset_locked(m_pm, false); qCInfo(logViz) << "preset unlocked"; break;
                 case Visualizer::Cmd::SetSensitivity:
@@ -71,6 +80,7 @@ public:
                     qCInfo(logViz) << "preset duration =" << item->m_pendingPresetDuration << "s";
                     break;
                 case Visualizer::Cmd::SetFavoritesMode: {
+                    if (m_preloader) m_preloader->clear();
                     projectm_playlist_clear(m_playlist);
                     if (item->m_pendingFavoritesOn) {
                         for (const QString& f : item->m_pendingFavoritesList) {
@@ -85,6 +95,10 @@ public:
                     pushNavState();
                     break;
                 }
+                case Visualizer::Cmd::SetPreloadDepth:
+                    if (m_preloader) m_preloader->setLookaheadDepth(item->m_preloadDepth);
+                    qCInfo(logViz) << "preload depth =" << item->m_preloadDepth;
+                    break;
                 default: break;
             }
         }
@@ -99,6 +113,8 @@ public:
             if (!m_warnedNoPm) { qCWarning(logViz) << "render(): no projectM handle"; m_warnedNoPm = true; }
             return;
         }
+
+        ensurePreloader();
 
         if (m_audioRing) {
             float samples[512];
@@ -162,6 +178,9 @@ private:
         const bool shuf = projectm_playlist_get_shuffle(self->m_playlist);
         qCInfo(logViz).noquote() << "preset[" << (static_cast<int>(index) + 1) << "/" << size << "]:" << name;
 
+        // Queue upcoming presets for background shader compilation.
+        self->preloadUpcoming(index);
+
         QPointer<Visualizer> item(self->m_item);
         const int idx = static_cast<int>(index);
         QMetaObject::invokeMethod(item.data(), [item, name, fullPath, size, idx, shuf] {
@@ -180,6 +199,37 @@ private:
         QMetaObject::invokeMethod(item.data(), [item, size, idx, shuf] {
             if (item) item->setNavStateFromRenderer(size, idx, shuf);
         }, Qt::QueuedConnection);
+    }
+
+    void ensurePreloader() {
+        if (m_preloader) return;
+        auto* ctx = QOpenGLContext::currentContext();
+        if (!ctx) return;
+        m_preloader = new PresetPreloader(ctx);
+        if (m_item) m_preloader->setLookaheadDepth(m_item->m_preloadDepth);
+        qCInfo(logViz) << "PresetPreloader created, depth=" << m_preloader->lookaheadDepth();
+    }
+
+    // Gather the next N preset paths from the current playlist position
+    // and queue them for background compilation.
+    void preloadUpcoming(unsigned int currentIndex) {
+        if (!m_preloader || !m_playlist) return;
+        const int depth = m_preloader->lookaheadDepth();
+        const uint32_t total = projectm_playlist_size(m_playlist);
+        if (total <= 1) return;
+
+        QStringList upcoming;
+        for (int i = 1; i <= depth; ++i) {
+            uint32_t idx = (currentIndex + static_cast<uint32_t>(i)) % total;
+            char* fn = projectm_playlist_item(m_playlist, idx);
+            if (fn) {
+                upcoming.append(QString::fromUtf8(fn));
+                projectm_playlist_free_string(fn);
+            }
+        }
+        if (!upcoming.isEmpty()) {
+            m_preloader->preloadPresets(upcoming);
+        }
     }
 
     void ensureProjectM(int w, int h) {
@@ -204,6 +254,7 @@ private:
     projectm_handle          m_pm = nullptr;
     projectm_playlist_handle m_playlist = nullptr;
     AudioRingConsumer* m_audioRing = nullptr;
+    PresetPreloader* m_preloader = nullptr;
 };
 
 // --- Visualizer (GUI thread side) ---
@@ -336,6 +387,15 @@ void Visualizer::setPresetDuration(int secs) {
     m_pendingPresetDuration = secs;
     m_pendingCmds.push_back(Cmd::SetPresetDuration);
     emit presetDurationChanged();
+    update();
+}
+
+void Visualizer::setPreloadDepth(int depth) {
+    depth = qBound(1, depth, 20);
+    if (depth == m_preloadDepth) return;
+    m_preloadDepth = depth;
+    m_pendingCmds.push_back(Cmd::SetPreloadDepth);
+    emit preloadDepthChanged();
     update();
 }
 
