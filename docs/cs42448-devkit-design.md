@@ -262,3 +262,22 @@ On the Jetson, register setup is **not** hand-written firmware — the in-tree `
   - §4.4 System Clocking; §4.5.6 TDM; Table 8 TDM clock ratios; Table 9 I/O channel allocation.
   - §4.7 Control port (SPI/I²C); §4.9 power-up sequence.
   - §7 External filters (input Fig 27, output Fig 31); analog output characteristics p.14.
+
+---
+
+## 10. Bring-up status (2026-06-08)
+
+First hardware bring-up on the **A203 daily driver**. Codec proven over I²C; the
+SoC-audio ALSA card is not yet up because the board still runs an old
+SoC-audio-OFF kernel — fixed by a full flash, not a module push.
+
+**Proven:**
+- I²C control end-to-end: `i2cdetect` → **0x48 ACK**, then `cs42xx8 1-0048: found device, revision 4` (driver probes, reads CHIP_ID, binds). I²C is independent of MCLK (ACKs with no MCLK).
+- DTB correct: `audio-codec@48` / `cirrus,cs42448` node goes live at `/i2c@c240000`; `&i2s5_to_codec` swap + `format=dsp_a` + masters applied.
+- Pinmux: **no DT fragment needed on A203** — kernel `pinmux@2430000` is `status=disabled` (MB1 owns boot pinmux); the A203 Seeed MB1 cfg already muxes dap5→i2s5 + aud_mclk→aud. (Devkit variant = stock NVIDIA pinmux, UNVERIFIED.)
+
+**DTB deploy gotcha:** L4TLauncher (UEFI) **ignores the extlinux `FDT` line** and boots the DTB from the flashed `kernel-dtb` partition. On this board that's `/dev/nvme0n1p3` (slot A; `_b` = nvme0n1p6), a raw FDT (magic `d00dfeed`, no signing). Updating the DT hot = write that partition; or flash it the supported way (recovery + tegraflash). Boot/kernel partitions are on **NVMe** here; `extlinux` `LINUX /boot/Image` loads the kernel from rootfs `/boot`.
+
+**Why a module push can't finish it:** the board was flashed SoC-audio-OFF. The new audio modules vermagic-match and load, but the **running kernel Image lacks the audio core** — new build has `CONFIG_SND_SOC=y` + `SND_DMAENGINE_PCM=y` compiled *into the Image*, so `snd_soc_tegra_pcm` fails with `Unknown symbol snd_dmaengine_pcm_*` on the old Image. ADSP is also absent (`nvadsp` module + tegra adsp firmware), so the `nvidia,tegra186-ape` card sits in `devices_deferred`. ⇒ **Full flash the audio-soc base image** (kernel + modules + DTB + firmware consistent).
+
+**Next:** flash → expect APE card auto-registers with the CS42448 BE → `aplay -l`; `amixer` unmute `CS42448 DAC1-4`; `speaker-test` 48k; scope BCLK(p12)/FS(p35)/MCLK(p7)/SDOUT(p40) + audio at TRS. Then TDM route / PipeWire card / PEQ (see `docs/jetson-cs42448-tdm-plan.md`).
