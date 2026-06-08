@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import BanksFrontend
 
 Item {
     id: root
@@ -239,6 +240,31 @@ Item {
 
             // --- Rendering ---
             Text { text: "Rendering"; color: "#fff"; font.pixelSize: 20; font.weight: Font.DemiBold }
+
+            // Live UI scale. Drives Theme.s — every element migrated to Theme.*
+            // relayouts instantly. Value persists across reboots (Settings).
+            RowLayout {
+                spacing: 12
+                Layout.fillWidth: true
+                Text { text: "UI Scale"; color: "#aaa"; font.pixelSize: 14; Layout.preferredWidth: 120 }
+                Slider {
+                    id: uiScaleSlider
+                    Layout.fillWidth: true
+                    from: 0.75; to: 2.0; stepSize: 0.05
+                    value: Theme.s
+                    onMoved: Theme.s = value
+                }
+                Text {
+                    text: Theme.s.toFixed(2) + "x"
+                    color: "#888"; font.pixelSize: 14
+                    Layout.preferredWidth: 48
+                }
+            }
+
+            Text {
+                text: "Affects elements migrated to Theme.* (incremental). Persisted."
+                color: "#555"; font.pixelSize: 11
+            }
 
             RowLayout {
                 spacing: 12

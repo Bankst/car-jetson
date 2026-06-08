@@ -261,6 +261,7 @@ qt_add_qml_module(banks-frontend
     VERSION 1.0
     IMPORTS QtQuick
     QML_FILES
+        qml/Theme.qml
         qml/Main.qml
         qml/HomePage.qml
         qml/VisualizerPage.qml
@@ -277,6 +278,10 @@ qt_add_qml_module(banks-frontend
     RESOURCES
         qml/qtquickcontrols2.conf
 )
+
+# Theme.qml is an app-wide QML singleton (live UI scale + sizing constants).
+set_source_files_properties(qml/Theme.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE TRUE)
 
 target_compile_definitions(banks-frontend PRIVATE
     BANKS_FRONTEND_PRESET_PATH="${CMAKE_INSTALL_FULL_DATADIR}/banks-frontend/presets"
