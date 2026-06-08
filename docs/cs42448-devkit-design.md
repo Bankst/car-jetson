@@ -102,11 +102,13 @@ Mode select is by strap, not by host: **CS (pin 1) → GND selects I²C mode.** 
 | 9 | SS | NC | SPI-only — AD0/CS now on-board strap → GND |
 | 10 | GND | GND | common ground |
 
-- **2 kΩ pull-ups on SCL + SDA to VLC (on-board 3V3).** Note: the Tegra gen2 I²C bus may carry on-module pull-ups; if present, omit the board pull-ups to avoid double-loading.
-- On-board straps required: **CS/pin1 → GND** (I²C mode), **AD0 → GND**, **AD1 → GND** (address 0x48).
+- **2 kΩ pull-ups on SCL + SDA to VLC (on-board 3V3).** ✅ **Bench-verified 2026-06-08:** Tegra gen2 bus carries **no** on-module pull-ups — with the codec lifted off the bus, SCL/SDA sit at full 3.3 V on the 2 kΩ alone (Jetson side idle 3.279 V). Keep the board 2 kΩ.
+- On-board straps required: **CS/pin1 → GND** (I²C mode), **AD0 → GND**, **AD1 → GND** (address 0x48). ✅ Verified present; codec ACKs at **0x48** (`i2cdetect`).
 - No INT line on CN3 → codec INT (pin 61) left open. The cs42xx8 driver uses no IRQ, so this is correct — no status polling needed (driver-managed).
-- Confirm EX_RST is 3.3 V, active-low, push-pull. If open-drain, add pull-up to VLC.
+- **EX_RST is active-low, push-pull, 3.3 V** — no open-drain. Bench idle pull: **9.1 kΩ → VLC** holds RST# deasserted (high); the Jetson GPIO push-pull drive overrides it on probe. Good idle state.
 - SPI fallback (NOT used — would need out-of-tree driver): MISO→64, SCLK→63, MOSI→2, SS→1.
+
+> **Bench note — 2.9 V idle on SCL/SDA is NORMAL, not a fault.** With the codec powered + out of reset, both I²C lines idle at ~2.9 V on the 2 kΩ pull-ups (≈200 µA sink, codec I/O-pad bias). This is **valid logic high** (I²C VIH = 0.7 × 3V3 = 2.31 V) and the bus enumerates fine. Diagnostic history that proves it's the active codec, not a wiring fault: codec **in reset** → lines snap to full 3.3 V; codec **lifted off bus** → 3.3 V; VLC pin reads 3.313 V (rail solid); LDO 3.309 V. Do **not** chase the 0.4 V drop — a genuinely stuck bus reads near 0 V, not 2.9 V.
 
 ### 3.3 Audio Jacks — 3.5 mm TRS, line level
 
@@ -244,8 +246,8 @@ On the Jetson, register setup is **not** hand-written firmware — the in-tree `
 ## 8. Open Items / Confirm Before Layout
 
 1. **Host MCLK frequency + Fs** — actual value on I²S pin 4. Sets `MFREQ`, the 256/512× ratio, and bounds ribbon-jitter risk. **Primary open question.**
-2. **I²C mode straps** — confirm CS→GND mode-select + AD0/AD1→GND address straps (0x48) are present on-board (datasheet §4.7). SPI map abandoned (no kernel SPI driver).
-3. **EX_RST drive type/level** — confirm 3.3 V active-low push-pull; add VLC pull-up if open-drain.
+2. ✅ **RESOLVED (2026-06-08).** I²C mode straps present (CS/AD0/AD1 → GND); codec ACKs at **0x48** via `i2cdetect`. SPI map abandoned (no kernel SPI driver).
+3. ✅ **RESOLVED (2026-06-08).** EX_RST = active-low push-pull 3.3 V (not open-drain); 9.1 kΩ → VLC holds idle-high, GPIO overrides on probe. Pull-ups: Tegra gen2 has none on-module → keep board 2 kΩ. (~2.9 V idle on SCL/SDA = normal active-codec bias, in-spec high — see §3.2 bench note.)
 4. **Output/input RC filter component values** — worked cutoff math still to be finalized (currently nominal 560 Ω / 2.7 nF out; input R TBD).
 5. **Decoupling BOM** — to be expanded to full reference-designator list.
 6. **Header NC pin 3 → GND strap** for MCLK flanking — confirm header pad is controllable.
