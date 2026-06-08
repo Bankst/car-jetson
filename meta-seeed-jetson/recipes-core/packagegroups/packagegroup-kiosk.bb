@@ -21,5 +21,5 @@ RDEPENDS:${PN} = " \
     banks-kiosk \
     triggerhappy \
     matchbox-terminal \
-    projectm-frontend-sdl2 \
+    banks-frontend \
 "

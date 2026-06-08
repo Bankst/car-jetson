@@ -25,7 +25,7 @@ RDEPENDS:${PN} = " \
     linux-firmware-qca \
     linux-firmware-ath10k \
     linux-firmware-iwlwifi \
-    bt-audio-agent \
+    \
     \
     pipewire \
     pipewire-alsa \

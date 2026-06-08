@@ -6,28 +6,10 @@ analyzer."
 HOMEPAGE = "https://github.com/bankst/car-jetson"
 LICENSE = "CLOSED"
 
-# Main source: banks-frontend subdirectory of car-jetson repo
-SRC_URI = "git://github.com/bankst/car-jetson.git;protocol=ssh;branch=worktree-aa-integration;name=main \
-           gitsm://github.com/projectM-visualizer/projectm.git;protocol=https;branch=master;destsuffix=libprojectm;name=libprojectm \
-           git://github.com/mborgerding/kissfft.git;protocol=https;branch=master;destsuffix=kissfft;name=kissfft \
-           git://github.com/ocornut/imgui.git;protocol=https;nobranch=1;destsuffix=imgui;name=imgui \
-           git://github.com/bankst/aasdk.git;protocol=https;branch=bankst-dev;destsuffix=aasdk;name=aasdk \
-           git://github.com/bankst/openauto.git;protocol=https;branch=qt6;destsuffix=openauto;name=openauto \
-           git://github.com/projectM-visualizer/presets-cream-of-the-crop.git;protocol=https;branch=master;destsuffix=presets-cream;name=presets \
-"
-SRCREV_main      = "3ef8f4fcd6c73f8e2ed3131d68315041fdaceedb"
-SRCREV_libprojectm = "4d2849333b63235a6af4d1f02508a97529d96dc7"
-SRCREV_kissfft   = "6398d8a1d0c92486b5ece8a456fd5e6a97ad1f08"
-SRCREV_imgui     = "dbb5eeaadffb6a3ba6a60de1290312e5802dba5a"
-SRCREV_aasdk     = "d338c403631e887ea9ad364fff8aa73f6e4aed31"
-SRCREV_openauto  = "8df462fa312a4ea9a3c1f8e1eb111a2c8683a311"
-SRCREV_presets   = "0180df21f5e0bd39b9060cc5de420ed2f1f9e509"
-SRCREV_FORMAT = "main"
+inherit externalsrc qt6-cmake pkgconfig systemd
 
-PV = "0.1.0+git"
-S = "${WORKDIR}/git/banks-frontend"
-
-inherit qt6-cmake pkgconfig systemd
+EXTERNALSRC = "${TOPDIR}/../banks-frontend"
+EXTERNALSRC_BUILD = "${WORKDIR}/build"
 
 # Qt6 modules: qtbase (Core, Gui, Network, DBus), qtdeclarative (Qml, Quick,
 # QuickControls2), qtconnectivity (Bluetooth).  qt6-cmake prepends
@@ -36,6 +18,7 @@ DEPENDS = " \
     qtbase \
     qtdeclarative \
     qtdeclarative-native \
+    qtwayland \
     qtconnectivity \
     protobuf \
     protobuf-native \
@@ -44,26 +27,22 @@ DEPENDS = " \
     libusb1 \
     pipewire \
     ffmpeg \
+    gpsd \
     systemd \
     virtual/egl \
     virtual/libgles3 \
 "
 
 # GPS passthrough for Android Auto navigation (optional)
-PACKAGECONFIG ??= ""
+PACKAGECONFIG ??= "gps"
 PACKAGECONFIG[gps] = "-DBANKS_AA_GPS=ON,-DBANKS_AA_GPS=OFF,gpsd"
 
 # Point CMake FetchContent at the pre-fetched source directories so it never
 # hits the network during do_configure / do_compile.
 EXTRA_OECMAKE += " \
-    -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
-    -DFETCHCONTENT_SOURCE_DIR_LIBPROJECTM=${WORKDIR}/libprojectm \
-    -DFETCHCONTENT_SOURCE_DIR_KISSFFT=${WORKDIR}/kissfft \
-    -DFETCHCONTENT_SOURCE_DIR_IMGUI=${WORKDIR}/imgui \
-    -DFETCHCONTENT_SOURCE_DIR_AASDK=${WORKDIR}/aasdk \
-    -DFETCHCONTENT_SOURCE_DIR_OPENAUTO=${WORKDIR}/openauto \
-    -DFETCHCONTENT_SOURCE_DIR_PRESETS_CREAM=${WORKDIR}/presets-cream \
-    -DBANKS_FRONTEND_FETCH_PRESETS=ON \
+    -DFETCHCONTENT_FULLY_DISCONNECTED=OFF \
+    -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
+    -DENABLE_INSTALL=ON \
     -DBANKS_FRONTEND_FAVORITES_PATH=/data/banks-frontend/favorites.json \
     -DPROTOBUF_PROTOC_EXECUTABLE=${STAGING_BINDIR_NATIVE}/protoc \
     -DProtobuf_PROTOC_EXECUTABLE=${STAGING_BINDIR_NATIVE}/protoc \
@@ -73,7 +52,8 @@ EXTRA_OECMAKE += " \
 # CMAKE_INSTALL_LIBDIR, but the systemd bbclass expects it under
 # ${systemd_system_unitdir} (/lib/systemd/system on non-usrmerge).
 do_install:append() {
-    if [ -f ${D}${libdir}/systemd/system/banks-frontend.service ]; then
+    if [ -f ${D}${libdir}/systemd/system/banks-frontend.service ] && \
+       [ "${libdir}/systemd/system" != "${systemd_system_unitdir}" ]; then
         install -d ${D}${systemd_system_unitdir}
         mv ${D}${libdir}/systemd/system/banks-frontend.service \
            ${D}${systemd_system_unitdir}/
@@ -91,6 +71,7 @@ RDEPENDS:${PN} = " \
     qtbase \
     qtdeclarative \
     qtdeclarative-qmlplugins \
+    qtwayland \
     qtconnectivity \
     pipewire \
     bluez5 \
