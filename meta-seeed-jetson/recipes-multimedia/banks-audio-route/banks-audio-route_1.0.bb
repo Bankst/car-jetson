@@ -2,11 +2,12 @@ SUMMARY = "Banks AHUB audio route + DSP defaults"
 DESCRIPTION = "systemd oneshot that wires the Tegra AHUB playback path \
 through MVC1 (HW-ramped volume) and OPE1 (PEQ + MBDRC) before reaching I2S5. \
 Establishes a single deterministic HW DSP path at boot. \
-Devkit-only — A203 has no I2S codec wired."
+Both carriers wire a CS42448 TDM codec to I2S5/DAP5 on the 40-pin header, \
+so the route is identical on devkit and A203."
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
-COMPATIBLE_MACHINE = "jetson-xavier-nx-banks-devkit"
+COMPATIBLE_MACHINE = "jetson-xavier-nx-(banks-devkit|a203)"
 
 SRC_URI = " \
     file://banks-audio-route.sh \

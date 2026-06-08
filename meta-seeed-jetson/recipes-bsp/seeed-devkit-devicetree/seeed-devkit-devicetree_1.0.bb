@@ -1,16 +1,17 @@
-DESCRIPTION = "Seeed A203 V2 carrier board device tree for Xavier NX"
+DESCRIPTION = "Xavier NX devkit (P3509) device tree with CS42448 TDM codec on I2S5"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
 
 inherit devicetree
 
-COMPATIBLE_MACHINE = "jetson-xavier-nx-a203"
+COMPATIBLE_MACHINE = "jetson-xavier-nx-banks-devkit"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/custom:"
 
+# Stock devkit DTB + CS42448 codec overlay (8out/6in TDM on I2S5/DAP5).
+# See docs/jetson-cs42448-tdm-plan.md.
 SRC_URI = " \
-    file://tegra194-p3668-a203.dts \
-    file://a203-sd.dtsi \
+    file://tegra194-p3668-cs42448.dts \
     file://cs42448.dtsi \
 "
 

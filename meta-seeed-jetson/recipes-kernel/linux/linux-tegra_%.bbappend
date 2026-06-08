@@ -18,11 +18,13 @@ SRC_URI:append = " \
     file://feature-adds.cfg \
 "
 
-# Audio kernel config machine-gated:
-#   A203 V2: no I2S codec pinout, SoC audio off (boot speed + log noise)
-#   devkit : 40-pin header exposes DAP5/I2S5 -> PCM5102A; SoC audio on + SPDIF
-SRC_URI:append:jetson-xavier-nx-a203 = " file://no-audio-soc.cfg"
-SRC_URI:append:jetson-xavier-nx-banks-devkit = " file://audio-soc.cfg"
+# Audio kernel config: BOTH carriers run the CS42448 TDM codec on I2S5/DAP5
+# via the 40-pin header (standard NVIDIA pinout), so both get the full SoC
+# audio stack (AHUB/ADMAIF/I2S5/...) + the cs42xx8 codec driver.
+# no-audio-soc.cfg is retained in-tree but unreferenced; re-gate a carrier to
+# it to drop SoC audio for boot speed / ADSP log noise if the codec is removed.
+SRC_URI:append:jetson-xavier-nx-a203          = " file://audio-soc.cfg file://cs42448.cfg"
+SRC_URI:append:jetson-xavier-nx-banks-devkit  = " file://audio-soc.cfg file://cs42448.cfg"
 
 # GCC 13 (scarthgap) compatibility — applies to ALL Xavier NX builds. L4T
 # 5.10 was authored for GCC 11; GCC 13 promotes several new warnings to

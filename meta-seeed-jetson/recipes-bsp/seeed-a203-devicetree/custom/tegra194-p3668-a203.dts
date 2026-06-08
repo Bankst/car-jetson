@@ -1,2 +1,5 @@
 #include "tegra194-p3668-all-p3509-0000.dts"
 #include "a203-sd.dtsi"
+// CS42448 TDM codec on I2S5/DAP5 + gen2 I2C (40-pin header, std NVIDIA pinout).
+// Same SoC-level overlay as the devkit; carrier-independent. See cs42448.dtsi.
+#include "cs42448.dtsi"

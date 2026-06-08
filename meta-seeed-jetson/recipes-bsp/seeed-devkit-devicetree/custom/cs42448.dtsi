@@ -1,0 +1,99 @@
+// CS42448 TDM codec on Tegra I2S5 (DAP5, 40-pin header).
+//
+// 8 DAC out / 6 ADC in, single-pair TDM (DSP_A), I2C control (CS strapped
+// GND -> I2C mode, AD0=AD1=0 -> addr 0x48). Codec is clock SLAVE; Tegra
+// I2S5 is BCLK+FS+MCLK master. MCLK from AUD_MCLK (header pin 7), 512xFs =
+// 24.576 MHz @ 48k (set via mclk-fs; rate programmed by the Tegra audio
+// machine driver). RESET on soc_gpio41_pq5 = MAIN_GPIO(Q,5) = header pin 29.
+//
+// Full design: docs/jetson-cs42448-tdm-plan.md + docs/jetson-audio-multimode-dsp.md.
+//
+// Bring-up notes / things to verify on first hardware:
+//   - cs42xx8 probe reads CHIP_ID over I2C; if the codec control port needs
+//     MCLK present at probe and AUD_MCLK is gated until a stream, probe may
+//     fail. Datasheet implies the I2C control port is independent of MCLK
+//     (control works at reset); verify. If it fails, energise AUD_MCLK early.
+//   - "format"/"bitclock-master"/"frame-master" on the dai-link drive the
+//     Tegra machine driver's set_dai_fmt (DSP_A) + master select. Mirrors the
+//     jetson-respeaker-4-mic TDM overlay pattern.
+//   - VA=5V, VD/VLS/VLC=3V3 come from the codec board's own LDO; the
+//     regulator-fixed nodes below are nominal always-on handles the driver's
+//     *-supply bindings require (enable is a no-op).
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/gpio/tegra194-gpio.h>
+#include <dt-bindings/clock/tegra194-clock.h>
+
+/ {
+	reg_cs42448_va: regulator-cs42448-va {
+		compatible = "regulator-fixed";
+		regulator-name = "cs42448-va";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+
+	reg_cs42448_3v3: regulator-cs42448-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "cs42448-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+};
+
+/* CS42448 control port -> gen2 I2C (header pins 27 SDA / 28 SCL), addr 0x48 */
+&gen2_i2c {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	cs42448: audio-codec@48 {
+		compatible = "cirrus,cs42448";
+		reg = <0x48>;
+
+		clocks = <&bpmp_clks TEGRA194_CLK_AUD_MCLK>;
+		clock-names = "mclk";
+
+		VA-supply  = <&reg_cs42448_va>;
+		VD-supply  = <&reg_cs42448_3v3>;
+		VLS-supply = <&reg_cs42448_3v3>;
+		VLC-supply = <&reg_cs42448_3v3>;
+
+		/* RST# = soc_gpio41_pq5 = MAIN_GPIO(Q,5) = 40-pin header pin 29 */
+		reset-gpios = <&tegra_main_gpio TEGRA194_MAIN_GPIO(Q, 5) GPIO_ACTIVE_LOW>;
+
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "CS42448";
+		status = "okay";
+
+		cs42448_port: port {
+			cs42448_ep: endpoint {
+				remote-endpoint = <&i2s5_dap_ep>;
+				mclk-fs = <512>;	/* 24.576 MHz @ 48k */
+				link-name = "cs42448-tdm";
+			};
+		};
+	};
+};
+
+/* Replace the stock I2S5 dummy codec link with the CS42448, TDM/DSP_A,
+ * Tegra I2S5 as bit+frame clock master. */
+&i2s5_to_codec {
+	status = "okay";
+	link-name = "cs42448-tdm";
+	format = "dsp_a";
+	bitclock-master;
+	frame-master;
+	fsync-width = <0>;
+
+	codec {
+		sound-dai = <&cs42448 0>;
+		prefix = "CS42448";
+	};
+};
+
+/* Point the I2S5 DAP audio-graph endpoint at the codec instead of the dummy. */
+&i2s5_dap_ep {
+	remote-endpoint = <&cs42448_ep>;
+	dai-format = "dsp_a";
+};

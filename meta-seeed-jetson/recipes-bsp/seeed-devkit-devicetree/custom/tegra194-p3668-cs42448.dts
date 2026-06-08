@@ -1,0 +1,4 @@
+// Xavier NX devkit (P3668 on P3509) + CS42448 TDM codec on I2S5/DAP5.
+// Stock devkit DTB, then the CS42448 codec overlay.
+#include "tegra194-p3668-all-p3509-0000.dts"
+#include "cs42448.dtsi"
