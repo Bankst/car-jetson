@@ -2,20 +2,30 @@
 //
 // 8 DAC out / 6 ADC in, single-pair TDM (DSP_A), I2C control (CS strapped
 // GND -> I2C mode, AD0=AD1=0 -> addr 0x48). Codec is clock SLAVE; Tegra
-// I2S5 is BCLK+FS+MCLK master. MCLK from AUD_MCLK (header pin 7), 512xFs =
-// 24.576 MHz @ 48k (set via mclk-fs; rate programmed by the Tegra audio
-// machine driver). RESET on soc_gpio41_pq5 = MAIN_GPIO(Q,5) = header pin 29.
+// I2S5 is BCLK+FS+MCLK master. MCLK from AUD_MCLK (header pin 7). The active
+// NVIDIA APE card (nvidia,tegra186-ape) uses card-level mclk-fs=256, so at
+// 48k MCLK = 12.288 MHz (NOT 24.576/512x). The endpoint mclk-fs below is an
+// audio-graph-card property and is inert here (the graph card is disabled);
+// the codec is a slave and its MFREQ follows whatever the machine driver
+// programs. RESET on soc_gpio41_pq5 = MAIN_GPIO(Q,5) = header pin 29.
+//
+// Pinmux: NOT set here. On Xavier NX the kernel pinmux controller is disabled
+// (status="disabled" in tegra194-soc-base.dtsi); boot pinmux is owned by MB1.
+// The A203 MB1 cfg (tegra19x-mb1-pinmux-p3668-a01.cfg) already muxes dap5
+// sclk/fs/dout/din -> i2s5 and aud_mclk -> aud, so DAP5 reaches header pins
+// 12/35/40/38 + 7 with no DT pinmux fragment. (Verified 2026-06-08.)
 //
 // Full design: docs/jetson-cs42448-tdm-plan.md + docs/jetson-audio-multimode-dsp.md.
 //
 // Bring-up notes / things to verify on first hardware:
-//   - cs42xx8 probe reads CHIP_ID over I2C; if the codec control port needs
-//     MCLK present at probe and AUD_MCLK is gated until a stream, probe may
-//     fail. Datasheet implies the I2C control port is independent of MCLK
-//     (control works at reset); verify. If it fails, energise AUD_MCLK early.
+//   - cs42xx8 probe reads CHIP_ID over I2C. I2C control is independent of
+//     MCLK (control works at reset) — confirmed at the bench: codec ACKs at
+//     0x48 with no MCLK running. So probe should not need MCLK energised early.
 //   - "format"/"bitclock-master"/"frame-master" on the dai-link drive the
 //     Tegra machine driver's set_dai_fmt (DSP_A) + master select. Mirrors the
 //     jetson-respeaker-4-mic TDM overlay pattern.
+//   - Card-level routing/widgets are needed only for the capture (ADC) path;
+//     playback (DAC->AOUT terminal) needs none. Add when wiring capture.
 //   - VA=5V, VD/VLS/VLC=3V3 come from the codec board's own LDO; the
 //     regulator-fixed nodes below are nominal always-on handles the driver's
 //     *-supply bindings require (enable is a no-op).
