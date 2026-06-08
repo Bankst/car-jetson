@@ -14,8 +14,8 @@ ApplicationWindow {
     property alias aaSession: aaPage.aaSession
     property alias visualizer: vizPage.visualizer
     property alias spectrumWidget: spectrum
-    width:  Math.round(Screen.desktopAvailableWidth * 0.8)
-    height: Math.round(Screen.desktopAvailableHeight * 0.8)
+    width:  kioskMode ? Screen.desktopAvailableWidth : Math.round(Screen.desktopAvailableWidth * 0.8)
+    height: kioskMode ? Screen.desktopAvailableHeight : Math.round(Screen.desktopAvailableHeight * 0.8)
     minimumWidth: 640; minimumHeight: 480
     title: "Banks"
 
@@ -63,15 +63,19 @@ ApplicationWindow {
                 delegate: Button {
                     required property var modelData
                     Layout.fillWidth: true
+                    Layout.fillHeight: true
                     flat: true
                     text: modelData.label
                     enabled: modelData.enabled
                     highlighted: views.currentIndex === modelData.idx
                     onClicked: views.currentIndex = modelData.idx
+                    onPressAndHold: if (modelData.idx === 4) touchDebug.show()
                 }
             }
         }
     }
+
+    TouchDebugOverlay { id: touchDebug }
 
     // Persistent spectrum-analyzer overlay — draggable + resizable.
     // Snaps to top-right when AA tab active (maps area), top-left otherwise.

@@ -1,23 +1,17 @@
 #!/bin/sh
-# KIOSK_TERMINAL: matchbox-terminal (mouse/touch), weston-terminal (fallback)
-# Override on device: echo weston-terminal > /var/lib/kiosk/terminal
-TERM_BIN=matchbox-terminal
-[ -f /var/lib/kiosk/terminal ] && TERM_BIN=$(cat /var/lib/kiosk/terminal)
+export QT_QPA_PLATFORM=wayland
+export QT_QUICK_BACKEND=rhi
+export QSG_RHI_BACKEND=opengl
+export QT_SCALE_FACTOR=1.5
 
 if [ -f /var/lib/kiosk/desktop-mode ]; then
+    /usr/bin/banks-frontend &
+    TERM_BIN=matchbox-terminal
+    [ -f /var/lib/kiosk/terminal ] && TERM_BIN=$(cat /var/lib/kiosk/terminal)
     case "$TERM_BIN" in
-        matchbox-terminal)
-            matchbox-terminal -e /usr/bin/banks-media-player &
-            exec matchbox-terminal -e /etc/kiosk/kiosk-login-shell
-            ;;
-        *)
-            weston-terminal --shell=/etc/kiosk/kiosk-media-shell &
-            exec weston-terminal --maximized --shell=/etc/kiosk/kiosk-login-shell
-            ;;
+        matchbox-terminal) exec matchbox-terminal -e /etc/kiosk/kiosk-login-shell ;;
+        *) exec weston-terminal --maximized --shell=/etc/kiosk/kiosk-login-shell ;;
     esac
 else
-    case "$TERM_BIN" in
-        matchbox-terminal) exec matchbox-terminal -e /usr/bin/banks-media-player ;;
-        *) exec weston-terminal --fullscreen --shell=/etc/kiosk/kiosk-media-shell ;;
-    esac
+    exec /usr/bin/banks-frontend --kiosk
 fi

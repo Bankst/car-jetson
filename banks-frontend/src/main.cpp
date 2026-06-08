@@ -1,5 +1,6 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
 #include <QQuickWindow>
 #include <QQuickStyle>
 #include <QSGRendererInterface>
@@ -99,6 +100,7 @@ int main(int argc, char** argv) {
     parser.setApplicationDescription("Banks infotainment frontend");
     parser.addHelpOption();
     parser.addVersionOption();
+    parser.addOption({{"k", "kiosk"}, "Run in kiosk mode (fullscreen, no window chrome)"});
     parser.process(app);
 
     // Process-wide audio capture singleton. Lives for full app lifetime so
@@ -125,6 +127,7 @@ int main(int argc, char** argv) {
     qmlRegisterSingletonInstance("BanksFrontend", 1, 0, "LogCapture", LogCapture::instance());
 
     QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty("kioskMode", parser.isSet("kiosk"));
     engine.loadFromModule("BanksFrontend", "Main");
     if (engine.rootObjects().isEmpty()) return 1;
 

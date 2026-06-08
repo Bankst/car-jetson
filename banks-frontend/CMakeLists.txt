@@ -212,6 +212,7 @@ qt_add_executable(banks-frontend
     src/main.cpp
     src/Log.h                src/Log.cpp
     src/Visualizer.h         src/Visualizer.cpp
+    src/PresetPreloader.h    src/PresetPreloader.cpp
     src/AudioCapture.h       src/AudioCapture.cpp
     src/AudioRingConsumer.h
     src/Fft.h                src/Fft.cpp
@@ -262,6 +263,7 @@ qt_add_qml_module(banks-frontend
         qml/SettingsMediaPage.qml
         qml/SettingsSystemPage.qml
         qml/SettingsLogPage.qml
+        qml/TouchDebugOverlay.qml
     RESOURCES
         qml/qtquickcontrols2.conf
 )
