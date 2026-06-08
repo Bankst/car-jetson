@@ -1,0 +1,13 @@
+header:
+  version: 14
+  includes:
+    - base.yml
+
+repos:
+  meta-qt6:
+    url: https://code.qt.io/yocto/meta-qt6.git
+    commit: v6.9.0
+
+local_conf_header:
+  qt6-compat: |
+    LAYERSERIES_COMPAT_qt6-layer:append = " scarthgap"
