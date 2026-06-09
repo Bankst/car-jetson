@@ -27,5 +27,6 @@ SRC_URI:append = " \
 #   -Wint-in-bool-context  : nvidia display driver ternary expressions
 #   -Wtautological-compare : misc r8168 OOT module
 SRC_URI:append = " file://0002-nvgpu-drop-gcc13-implicit-fallthrough-override.patch"
+SRC_URI:append = " file://0003-hdmi-allow-portrait-resolutions-above-2160p.patch"
 EXTRA_OEMAKE:append = " KCFLAGS='-Wno-address -Wno-implicit-fallthrough -Wno-int-in-bool-context -Wno-tautological-compare'"
 
