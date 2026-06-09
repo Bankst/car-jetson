@@ -9,11 +9,15 @@
 // the codec is a slave and its MFREQ follows whatever the machine driver
 // programs. RESET on soc_gpio41_pq5 = MAIN_GPIO(Q,5) = header pin 29.
 //
-// Pinmux: NOT set here. On Xavier NX the kernel pinmux controller is disabled
-// (status="disabled" in tegra194-soc-base.dtsi); boot pinmux is owned by MB1.
-// The A203 MB1 cfg (tegra19x-mb1-pinmux-p3668-a01.cfg) already muxes dap5
-// sclk/fs/dout/din -> i2s5 and aud_mclk -> aud, so DAP5 reaches header pins
-// 12/35/40/38 + 7 with no DT pinmux fragment. (Verified 2026-06-08.)
+// Pinmux: MB1 owns boot pinmux for most pads. The A203 MB1 cfg already muxes
+// dap5 sclk/fs/dout/din -> i2s5 and aud_mclk -> aud, so DAP5 reaches header
+// pins 12/35/40/38 + 7 with no DT override. (Verified 2026-06-08.)
+// EXCEPTION: pin 29 (soc_gpio41_pq5) needs a kernel-side pinmux override to
+// set PULL_UP. Stock hdr40 DTS sets PULL_NONE + function=extperiph3; when the
+// cs42xx8 driver releases the GPIO (unbind/modprobe cycle), the pad floats to
+// ~1.55V — below VIH for 3.3V logic — holding the codec in reset. The board's
+// 9.1kΩ external pullup to VLC can't win against the Tegra internal pulldown.
+// Fix: function=gpio + pull-up so the pad defaults high (RST# de-asserted).
 //
 // Full design: docs/jetson-cs42448-tdm-plan.md + docs/jetson-audio-multimode-dsp.md.
 //
@@ -33,6 +37,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/gpio/tegra194-gpio.h>
 #include <dt-bindings/clock/tegra194-clock.h>
+#include <dt-bindings/pinctrl/pinctrl-tegra.h>
 
 / {
 	reg_cs42448_va: regulator-cs42448-va {
@@ -52,10 +57,26 @@
 	};
 };
 
+/* Pin 29 (soc_gpio41_pq5): override stock hdr40 pinmux to add pull-up so RST#
+ * defaults high (de-asserted) even when the GPIO is unclaimed by the driver. */
+&pinmux {
+	cs42448_rst_default: cs42448-rst-default {
+		nvidia,pins = "soc_gpio41_pq5";
+		nvidia,function = "rsvd2";
+		nvidia,pull = <TEGRA_PIN_PULL_UP>;
+		nvidia,tristate = <TEGRA_PIN_ENABLE>;
+		nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+		nvidia,io-high-voltage = <TEGRA_PIN_DISABLE>;
+		nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+	};
+};
+
 /* CS42448 control port -> gen2 I2C (header pins 27 SDA / 28 SCL), addr 0x48 */
 &gen2_i2c {
 	status = "okay";
 	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&cs42448_rst_default>;
 
 	cs42448: audio-codec@48 {
 		compatible = "cirrus,cs42448";
@@ -92,14 +113,50 @@
 	status = "okay";
 	link-name = "cs42448-tdm";
 	format = "dsp_a";
-	bitclock-master;
-	frame-master;
-	fsync-width = <0>;
+	bit-format = "s32_le";
+	bclk_ratio = <1>;
+	srate = <48000>;
+	num-channel = <8>;
 
 	codec {
 		sound-dai = <&cs42448 0>;
 		prefix = "CS42448";
 	};
+};
+
+/* Disable ADSP — its component_open callback returns -EPIPE ("Broken Path
+ * FE not linked to BE") for every PCM stream on the APE card, blocking the
+ * DPCM framework from opening the I2S5 BE and preventing hw_params from
+ * reaching the CS42448 codec. ADSP is only needed for on-chip DSP plugins
+ * (mp3-dec, spkprot, AEC) which we don't use for direct I2S playback. */
+&tegra_adsp_audio {
+	status = "disabled";
+};
+
+/* DAPM routing: connect codec output widgets to card-level speaker endpoints
+ * so DAPM can trace a complete path from FE (ADMAIF) through the XBAR/I2S5
+ * BE to the codec outputs. Without this, DAPM leaves I2S5 powered off. */
+&tegra_sound {
+	assigned-clocks = <&bpmp_clks TEGRA194_CLK_PLLA_OUT0>,
+			  <&bpmp_clks TEGRA194_CLK_AUD_MCLK>;
+	assigned-clock-parents = <&bpmp_clks TEGRA194_CLK_PLLA>,
+				 <&bpmp_clks TEGRA194_CLK_PLLA_OUT0>;
+	assigned-clock-rates = <0>, <12288000>;
+
+	nvidia-audio-card,widgets =
+		"Speaker", "CS42448 Out1",
+		"Speaker", "CS42448 Out2",
+		"Speaker", "CS42448 Out3",
+		"Speaker", "CS42448 Out4";
+	nvidia-audio-card,routing =
+		"CS42448 Out1",     "CS42448 AOUT1L",
+		"CS42448 Out1",     "CS42448 AOUT1R",
+		"CS42448 Out2",     "CS42448 AOUT2L",
+		"CS42448 Out2",     "CS42448 AOUT2R",
+		"CS42448 Out3",     "CS42448 AOUT3L",
+		"CS42448 Out3",     "CS42448 AOUT3R",
+		"CS42448 Out4",     "CS42448 AOUT4L",
+		"CS42448 Out4",     "CS42448 AOUT4R";
 };
 
 /* Point the I2S5 DAP audio-graph endpoint at the codec instead of the dummy. */

@@ -9,14 +9,14 @@
 // the codec is a slave and its MFREQ follows whatever the machine driver
 // programs. RESET on soc_gpio41_pq5 = MAIN_GPIO(Q,5) = header pin 29.
 //
-// Pinmux: NOT set here. On Xavier NX the kernel pinmux controller is disabled
-// (status="disabled" in tegra194-soc-base.dtsi); boot pinmux is owned by MB1.
-// NOTE (devkit): unlike the A203 — whose Seeed MB1 cfg is verified to mux
-// dap5 sclk/fs/dout/din -> i2s5 + aud_mclk -> aud — this devkit variant boots
-// the STOCK NVIDIA p3668 MB1 pinmux, which may NOT default DAP5 to i2s5. If
-// the card is silent on devkit, either apply NVIDIA's jetson-io hdr40 overlay
-// (tegra194-p3668-all-p3509-0000-hdr40.dtbo) or add a &pinmux i2s5 fragment
-// here. Verify on devkit hardware before assuming the pins are routed.
+// Pinmux: MB1 owns boot pinmux for most pads. NOTE (devkit): the STOCK NVIDIA
+// p3668 MB1 pinmux may NOT default DAP5 to i2s5. If the card is silent on
+// devkit, either apply NVIDIA's jetson-io hdr40 overlay or add a &pinmux i2s5
+// fragment here. Verify on devkit hardware before assuming the pins are routed.
+// EXCEPTION: pin 29 (soc_gpio41_pq5) needs a kernel-side pinmux override to
+// set PULL_UP. Stock hdr40 DTS sets PULL_NONE + function=extperiph3; when the
+// cs42xx8 driver releases the GPIO, the pad floats to ~1.55V — below VIH for
+// 3.3V logic — holding the codec in reset. Fix: function=rsvd2 + pull-up.
 //
 // Full design: docs/jetson-cs42448-tdm-plan.md + docs/jetson-audio-multimode-dsp.md.
 //
@@ -36,6 +36,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/gpio/tegra194-gpio.h>
 #include <dt-bindings/clock/tegra194-clock.h>
+#include <dt-bindings/pinctrl/pinctrl-tegra.h>
 
 / {
 	reg_cs42448_va: regulator-cs42448-va {
@@ -55,10 +56,26 @@
 	};
 };
 
+/* Pin 29 (soc_gpio41_pq5): override stock hdr40 pinmux to add pull-up so RST#
+ * defaults high (de-asserted) even when the GPIO is unclaimed by the driver. */
+&pinmux {
+	cs42448_rst_default: cs42448-rst-default {
+		nvidia,pins = "soc_gpio41_pq5";
+		nvidia,function = "rsvd2";
+		nvidia,pull = <TEGRA_PIN_PULL_UP>;
+		nvidia,tristate = <TEGRA_PIN_ENABLE>;
+		nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+		nvidia,io-high-voltage = <TEGRA_PIN_DISABLE>;
+		nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+	};
+};
+
 /* CS42448 control port -> gen2 I2C (header pins 27 SDA / 28 SCL), addr 0x48 */
 &gen2_i2c {
 	status = "okay";
 	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&cs42448_rst_default>;
 
 	cs42448: audio-codec@48 {
 		compatible = "cirrus,cs42448";
@@ -95,14 +112,38 @@
 	status = "okay";
 	link-name = "cs42448-tdm";
 	format = "dsp_a";
-	bitclock-master;
-	frame-master;
-	fsync-width = <0>;
+	bitclock-slave;
+	frame-slave;
+	bitclock-noninversion;
+	frame-noninversion;
 
 	codec {
 		sound-dai = <&cs42448 0>;
 		prefix = "CS42448";
 	};
+};
+
+&tegra_sound {
+	assigned-clocks = <&bpmp_clks TEGRA194_CLK_PLLA_OUT0>,
+			  <&bpmp_clks TEGRA194_CLK_AUD_MCLK>;
+	assigned-clock-parents = <&bpmp_clks TEGRA194_CLK_PLLA>,
+				 <&bpmp_clks TEGRA194_CLK_PLLA_OUT0>;
+	assigned-clock-rates = <0>, <12288000>;
+
+	nvidia-audio-card,widgets =
+		"Speaker", "CS42448 Out1",
+		"Speaker", "CS42448 Out2",
+		"Speaker", "CS42448 Out3",
+		"Speaker", "CS42448 Out4";
+	nvidia-audio-card,routing =
+		"CS42448 Out1",     "CS42448 AOUT1L",
+		"CS42448 Out1",     "CS42448 AOUT1R",
+		"CS42448 Out2",     "CS42448 AOUT2L",
+		"CS42448 Out2",     "CS42448 AOUT2R",
+		"CS42448 Out3",     "CS42448 AOUT3L",
+		"CS42448 Out3",     "CS42448 AOUT3R",
+		"CS42448 Out4",     "CS42448 AOUT4L",
+		"CS42448 Out4",     "CS42448 AOUT4R";
 };
 
 /* Point the I2S5 DAP audio-graph endpoint at the codec instead of the dummy. */

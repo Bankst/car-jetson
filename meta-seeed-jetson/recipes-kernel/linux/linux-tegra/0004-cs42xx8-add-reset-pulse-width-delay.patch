@@ -1,0 +1,41 @@
+From: Banks Troutman <banks.troutman@oxos.com>
+Subject: [PATCH] ASoC: cs42xx8: reset pulse width + sysclk guard for Tegra
+
+1. Add msleep(5) between reset assert and de-assert. The CS42448
+   datasheet requires minimum 1ms RST# low pulse (section 4.9).
+
+2. Guard set_dai_sysclk against the NVIDIA Tegra machine driver
+   passing the sample rate (e.g. 48000) instead of the MCLK
+   frequency. If freq < 1 MHz, keep the clk_get_rate value cached
+   at probe. Without this, hw_params computes ratio=1 and rejects
+   it as "unsupported sysclk ratio".
+
+Signed-off-by: Banks Troutman <banks.troutman@oxos.com>
+---
+ sound/soc/codecs/cs42xx8.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/sound/soc/codecs/cs42xx8.c b/sound/soc/codecs/cs42xx8.c
+--- a/sound/soc/codecs/cs42xx8.c
++++ b/sound/soc/codecs/cs42xx8.c
+@@ -206,7 +206,9 @@
+ 	struct snd_soc_component *component = codec_dai->component;
+ 	struct cs42xx8_priv *cs42xx8 = snd_soc_component_get_drvdata(component);
+
+-	cs42xx8->sysclk = freq;
++	/* Ignore sample-rate values passed by machine drivers (e.g. Tegra) */
++	if (freq >= 1000000)
++		cs42xx8->sysclk = freq;
+
+ 	return 0;
+ }
+@@ -553,6 +555,9 @@
+ 	if (IS_ERR(cs42xx8->gpiod_reset))
+ 		return PTR_ERR(cs42xx8->gpiod_reset);
+
++	/* CS42448 requires minimum 1ms RST# low pulse (datasheet section 4.9) */
++	msleep(5);
++
+ 	gpiod_set_value_cansleep(cs42xx8->gpiod_reset, 0);
+
+ 	cs42xx8->clk = devm_clk_get(dev, "mclk");
