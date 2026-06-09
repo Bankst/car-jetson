@@ -1,0 +1,26 @@
+From: Banks Troutman <banks.troutman@oxos.com>
+Date: Mon, 09 Jun 2026 00:00:00 +0000
+Subject: [PATCH] ASoC: tegra: enable DPCM on codec-to-codec links
+
+Set no_pcm, dpcm_playback, dpcm_capture on C2C dai-links so the
+ASoC core opens the BE stream. Without this, external codecs on
+C2C links never get hw_params and I2S clocks never start.
+
+Also call canonicalize_dailink to propagate dai_fmt and set
+ignore_pmdown_time to match PCM_LINK behavior.
+
+---
+--- a/nvidia/sound/soc/tegra-alt/utils/tegra_asoc_dt_parser.c
++++ b/nvidia/sound/soc/tegra-alt/utils/tegra_asoc_dt_parser.c
+@@ -387,6 +387,11 @@
+ 				break;
+ 			case C2C_LINK:
+ 				dai_link->params = &link_params;
++				dai_link->no_pcm = 1;
++				dai_link->dpcm_playback = 1;
++				dai_link->dpcm_capture = 1;
++				asoc_simple_card_canonicalize_dailink(dai_link);
++				dai_link->ignore_pmdown_time = 1;
+ 				break;
+ 			default:
+ 				dev_err(&pdev->dev, "DAI link type invalid\n");
