@@ -2,7 +2,7 @@
 # banks-audio-route — establish HW audio path through AHUB accelerators.
 #
 # Default route on devkit:
-#   PipeWire (ALSA) -> ADMAIF1 -> MVC1 -> OPE1 -> I2S5 -> PCM5102A
+#   PipeWire (ALSA) -> ADMAIF1 -> MVC1 -> OPE1 -> I2S5 -> CS42448 (8ch TDM)
 #
 # MVC1 = HW-ramped master volume (linear curve: int = dB*100 + 12000;
 #        unity = 12000, default 11500 = -5 dB system headroom).
@@ -31,8 +31,8 @@ PEQ_STAGES="${BANKS_AUDIO_PEQ_STAGES:-11}"
 PEQ_DEFAULT_ACTIVE="${BANKS_AUDIO_PEQ_ACTIVE:-off}"
 MBDRC_MODE="${BANKS_AUDIO_MBDRC_MODE:-bypass}"
 I2S5_RATE="${BANKS_AUDIO_I2S5_RATE:-48000}"
-I2S5_CHANNELS="${BANKS_AUDIO_I2S5_CHANNELS:-2}"
-I2S5_BITS="${BANKS_AUDIO_I2S5_BITS:-16}"
+I2S5_CHANNELS="${BANKS_AUDIO_I2S5_CHANNELS:-8}"
+I2S5_BITS="${BANKS_AUDIO_I2S5_BITS:-32}"
 # Linear curve: int = dB*100 + 12000. 11500 = -5 dB headroom for hot content.
 # 12000 = 0 dB unity. Range 0..16000 (-120 dB .. +40 dB).
 MASTER_VOL="${BANKS_AUDIO_MASTER_VOL:-11500}"
@@ -64,10 +64,12 @@ cset "MVC1 Mux"        "$SOURCE_ADMAIF"
 cset "OPE1 Mux"        "MVC1"
 cset "${SINK_I2S} Mux" "OPE1"
 
-log "I2S5 format: ${I2S5_RATE} Hz, ${I2S5_CHANNELS} ch, ${I2S5_BITS}-bit"
+log "I2S5 format: ${I2S5_RATE} Hz, ${I2S5_CHANNELS} ch, ${I2S5_BITS}-bit, DSP-A, codec-slave"
 cset "${SINK_I2S} Sample Rate"             "$I2S5_RATE"
 cset "${SINK_I2S} Playback Audio Channels" "$I2S5_CHANNELS"
 cset "${SINK_I2S} Playback Audio Bit Format" "$I2S5_BITS"
+cset "${SINK_I2S} codec frame mode"        "dsp-a"
+cset "${SINK_I2S} codec master mode"       "cbs-cfs"
 
 log "MVC1 master volume init = $MASTER_VOL ($(( (MASTER_VOL - 12000) / 100 )) dB nominal)"
 cset "MVC1 Volume" "$MASTER_VOL"
