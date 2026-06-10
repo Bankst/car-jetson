@@ -23,8 +23,12 @@ SRC_URI:append = " \
 # audio stack (AHUB/ADMAIF/I2S5/...) + the cs42xx8 codec driver.
 # no-audio-soc.cfg is retained in-tree but unreferenced; re-gate a carrier to
 # it to drop SoC audio for boot speed / ADSP log noise if the codec is removed.
-SRC_URI:append:jetson-xavier-nx-a203          = " file://audio-soc.cfg file://cs42448.cfg"
-SRC_URI:append:jetson-xavier-nx-banks-devkit  = " file://audio-soc.cfg file://cs42448.cfg"
+# 0003 patch: the tegra186-ape machine driver only set_sysclk()'s an allowlist
+# of codecs; cs42448 was absent, so the codec never learned its MCLK rate and
+# cs42xx8_hw_params rejected every stream ("unsupported sysclk ratio", -EINVAL).
+# The patch forwards aud_mclk (=256*Fs) to the cs42448-tdm link.
+SRC_URI:append:jetson-xavier-nx-a203          = " file://audio-soc.cfg file://cs42448.cfg file://0003-tegra_codecs-set-cs42448-sysclk.patch"
+SRC_URI:append:jetson-xavier-nx-banks-devkit  = " file://audio-soc.cfg file://cs42448.cfg file://0003-tegra_codecs-set-cs42448-sysclk.patch"
 
 # GCC 13 (scarthgap) compatibility — applies to ALL Xavier NX builds. L4T
 # 5.10 was authored for GCC 11; GCC 13 promotes several new warnings to

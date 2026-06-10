@@ -1,0 +1,44 @@
+From: Banks Troutman <banks.troutman@oxos.com>
+Subject: [PATCH] ASoC: tegra: program CS42448 sysclk from the APE machine driver
+
+tegra_codecs_runtime_setup() only forwards the audio master clock to the
+codec (snd_soc_dai_set_sysclk) for a hard-coded allowlist of codecs
+(rt565x, rt5640, tas2552). The Cirrus cs42xx8 codec on the "cs42448-tdm"
+dai-link is never told its MCLK rate, so cs42xx8 keeps the stale
+probe-time clk_get_rate("mclk") value. cs42xx8_hw_params() then computes
+ratio = sysclk / rate, fails to match the cs42xx8_ratios[] table, and
+rejects every stream with:
+
+    cs42xx8 1-0048: unsupported sysclk ratio
+    ASoC: error at snd_soc_dai_hw_params on cs42448: -22
+
+The Tegra side already programs aud_mclk correctly (= srate * mclk-fs =
+256*Fs = 12.288 MHz @ 48k via tegra_asoc_utils). Forward that requested
+rate to the codec, mirroring the existing rt565x-playback handling, so
+the ratio resolves to exactly 256 and TDM playback works.
+
+Signed-off-by: Banks Troutman <banks.troutman@oxos.com>
+---
+ sound/soc/tegra/tegra_codecs.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+--- a/sound/soc/tegra/tegra_codecs.c
++++ b/sound/soc/tegra/tegra_codecs.c
+@@ -239,6 +239,16 @@ int tegra_codecs_runtime_setup(struct snd_soc_card *card,
+ 			}
+ 		}
+ 	}
+
++	rtd = get_pcm_runtime(card, "cs42448-tdm");
++	if (rtd) {
++		err = snd_soc_dai_set_sysclk(rtd->dais[rtd->num_cpus], 0,
++					     aud_mclk, SND_SOC_CLOCK_IN);
++		if (err < 0) {
++			dev_err(card->dev, "cs42448 sysclk not set\n");
++			return err;
++		}
++	}
++
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(tegra_codecs_runtime_setup);
