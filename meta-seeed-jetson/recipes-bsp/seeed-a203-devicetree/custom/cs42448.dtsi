@@ -107,3 +107,19 @@
 	remote-endpoint = <&cs42448_ep>;
 	dai-format = "dsp_a";
 };
+
+/* Disable the ADSP. It is useless on this image: ADSP OS runs secure-load
+ * (nvidia,adsp_os_secload=1), so only the WIRE passthrough app initialises —
+ * the 5 real plugins (mp3-dec/aac-dec/src/spkprot/aec) are NOT bundled in our
+ * signed adsp-fw.bin and dynamic ELF load is blocked under secload. No OEM key
+ * to add any. Required because audio-soc.cfg unsets CONFIG_TEGRA_NVADSP +
+ * CONFIG_SND_SOC_TEGRA210_ADSP: with the ADSP driver gone, the tegra186-ape
+ * card's ADSP dai-links would EPROBE_DEFER forever (taking the codec down with
+ * them) unless the codec node they reference is marked disabled. Setting
+ * tegra_adsp_audio status=disabled makes of_dai_link_is_available() skip every
+ * ADSP link, so the card registers cleanly with just ADMAIF + I2S5 + the AHUB
+ * accelerators (OPE/MVC/SFC/MIXER = the actually-usable DSP).
+ * See docs/audio-board/cs42448-driver-notes.md. */
+&tegra_adsp_audio {
+	status = "disabled";
+};
