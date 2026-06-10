@@ -341,6 +341,68 @@ rootfs the board boots from and are scp-able; no flash needed.
 ## After deploy — verify
 - `dmesg | grep cs42` clean of "unsupported sysclk ratio".
 - `speaker-test -D hw:APE,0 -c 8 -r 48000` runs without `-EINVAL`.
-- Then check the BCLK: live `i2s5` clk read 24.576 MHz (512·Fs) — confirm on
-  scope whether the I2S block halves it to 256·Fs at the pin (TDM needs
-  SCLK=256·Fs); if not, that's the next thing to chase.
+
+(NOTE: the module carrying `tegra_codecs.o` is **`snd-soc-tegra-utils.ko`**, NOT
+`snd-soc-tegra-machine-driver.ko` — that's what to push for the sysclk fix.)
+
+---
+
+# VERIFIED ON HARDWARE — 2026-06-10 (board 10.0.10.171)
+
+Both bugs fixed, deployed (module push + .deb, no flash), and verified
+end-to-end. The earlier "i2s5 = 24.576 MHz / scope it" worry was NOT a separate
+issue — it was the `bclk_ratio=256` bug (BUG B below). After the fix
+`i2s5 = 12.288 MHz`, frame = 256 BCLK.
+
+## BUG B — 1/4 sample rate (root-caused + fixed in userland, no patch)
+Stale `asound.state` **`I2S5 BCLK Ratio = 256`** → driver
+`num_bclk = sample_size * bclk_ratio = 32 * 256 = 8192` → requested BCLK clamps
+(to 24.576 MHz) AND `CH_BIT_CNT` clamps to its max 2047 → **2048-BCLK frame →
+LRCK = 12 kHz** (1/4 of 48k). Correct = `bclk_ratio = 1` (or driver default 0):
+num_bclk=32, frame=256, LRCK=48k.
+- KEY: `tegra210_i2s_set_tdm_slot()` **discards `slots` and `slot_width`** (only
+  stores tx/rx mask); `TOTAL_SLOTS` = channels. So `bclk_ratio` is the ONLY
+  frame-timing lever, and standard DT `dai-tdm-slot-width` is inert.
+- The machine driver only parses `dai_fmt` from DT → no DT binding for
+  bclk_ratio. Crossbar routing is inherently a runtime kcontrol anyway.
+  **Decision: drive ALSA explicitly at boot, no kernel patch.** Fix lives in the
+  `banks-audio-route` recipe (pins `I2S5 BCLK Ratio=1`, 8ch/32-bit), which runs
+  `After=alsa-restore` as the authoritative last writer.
+
+## Cold-boot verification
+Rebooted; with zero manual touch: `banks-audio-route.service` active, journal
+shows `alsa-restore Finished` then `banks-audio-route Starting` → route
+established. Live controls: `I2S5 BCLK Ratio=1`, route `ADMAIF1→MVC1→OPE1→I2S5`.
+Tone: state RUNNING, **rate ≈ 48k, frame = 256 BCLK, i2s5 = 12.288 MHz**.
+
+## 256-conflict stress test (proves the override is robust)
+Poisoned `asound.state` → `bclk_ratio=256`, `alsactl store`, rebooted:
+- post-boot `asound.state` file still = 256 → alsa-restore DID apply the bad
+  value at boot;
+- but **live `I2S5 BCLK Ratio = 1`** → the service overrode it;
+- tone: **rate ≈ 48k, frame = 256 BCLK**. ✓
+Cleaned `asound.state` back to 1. Verdict: even against the exact hostile value
+that caused the original bug, cold boot lands correct — the ordering
+(`alsa-restore` → `banks-audio-route`) + explicit `cset` guarantees it.
+
+## Full clock tree (verified live, 8ch/48k)
+`clk_m 19.2M → PLLA 294.911914M → plla_out0 49.151985M (÷6) → ÷4 → {aud_mclk,
+i2s5} = 12.287996M`. I2S5: MASTER, FSYNC/TDM, BIT_SIZE=32, 8 slots, frame=256 →
+LRCK 48000.0, codec ratio 256. −0.3 ppm physical (PLLA frac-N); codec told clean
+12288000 so ratio computes exact 256.
+
+## Deploy recap
+- Sysclk fix (`0003` patch): pushed `snd-soc-tegra-utils.ko` to
+  `/lib/modules/<uname>/.../tegra/` + `depmod` + reboot (vermagic matched).
+- bclk fix: `bitbake banks-audio-route` → `.deb` → `scp -O` → `dpkg -i` →
+  `systemctl enable --now`.
+- Both still need a full image rebuild+flash to BAKE (codec fix is a live-pushed
+  module on the running board).
+
+## Ops gotchas (this board)
+`scp` needs `-O` (no sftp subsystem). `/dev/mem` blocked (STRICT_DEVMEM) → read
+I2S regs from `/sys/kernel/debug/regmap/2901400.i2s/registers` (a0=CTRL,
+a4=TIMING[CH_BIT_CNT], a8=SLOT_CTRL) and clocks from
+`/sys/kernel/debug/clk/<c>/clk_rate`. python `mmap` missing (stripped). Board is
+`10.0.10.171` (LAN); `192.168.55.1` was a stale/other host. `/tmp` is tmpfs —
+regenerate tone files after every reboot.
