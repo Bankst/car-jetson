@@ -89,8 +89,14 @@
 		VLS-supply = <&reg_cs42448_3v3>;
 		VLC-supply = <&reg_cs42448_3v3>;
 
-		/* RST# = soc_gpio41_pq5 = MAIN_GPIO(Q,5) = 40-pin header pin 29 */
-		reset-gpios = <&tegra_main_gpio TEGRA194_MAIN_GPIO(Q, 5) GPIO_ACTIVE_LOW>;
+		/* RST# = soc_gpio41_pq5 = MAIN_GPIO(Q,5) = 40-pin header pin 29.
+		 * reset-gpios intentionally NOT declared: the cs42xx8 driver
+		 * claims PQ.05 and drives it LOW at probe, asserting reset even
+		 * though the cs42448_rst_default pinmux sets pull-up + tristate.
+		 * Leaving it to the pinmux keeps RST# de-asserted (high). The
+		 * physical pin-29 wire is disconnected on the bench board.
+		 * HARDWARE-GATED: verify codec still probes (0x48 ACK) without
+		 * the driver-driven reset pulse before trusting on real boards. */
 
 		#sound-dai-cells = <1>;
 		sound-name-prefix = "CS42448";
