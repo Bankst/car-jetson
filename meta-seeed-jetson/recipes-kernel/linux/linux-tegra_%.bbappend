@@ -38,5 +38,6 @@ SRC_URI:append = " file://0003-hdmi-allow-portrait-resolutions-above-2160p.patch
 SRC_URI:append = " file://0004-cs42xx8-tegra-compat-fixes.patch"
 SRC_URI:append = " file://0005-tegra-asoc-enable-dpcm-on-c2c-links.patch"
 SRC_URI:append = " file://0006-cs42xx8-reapply-dai-fmt-in-hw-params.patch"
+SRC_URI:append = " file://0007-tegra-i2s-add-fixed-tdm-dt-overrides.patch"
 EXTRA_OEMAKE:append = " KCFLAGS='-Wno-address -Wno-implicit-fallthrough -Wno-int-in-bool-context -Wno-tautological-compare'"
 

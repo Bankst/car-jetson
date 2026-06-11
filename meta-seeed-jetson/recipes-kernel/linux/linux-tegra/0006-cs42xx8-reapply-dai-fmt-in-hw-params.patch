@@ -1,19 +1,8 @@
 From: Banks Troutman <banks.troutman@oxos.com>
-Date: Mon, 09 Jun 2026 00:00:00 +0000
 Subject: [PATCH] ASoC: cs42xx8: re-apply DAI format in hw_params
 
-set_dai_fmt is called during card registration when the codec may
-be in runtime suspend (regcache_cache_only=true). The INTF register
-write goes to the regmap cache but is overwritten when runtime_resume
-calls regcache_sync with power-on defaults.
-
-Fix: save the INTF register value computed by set_dai_fmt and
-re-apply it in hw_params, where the codec is guaranteed to be
-runtime-resumed and regmap writes reach the hardware.
-
----
---- a/sound/soc/codecs/cs42xx8.c
-+++ b/sound/soc/codecs/cs42xx8.c
+--- a/sound/soc/codecs/cs42xx8.c	2026-06-10 03:02:04.327938598 -0400
++++ b/sound/soc/codecs/cs42xx8.c	2026-06-10 03:02:04.343419893 -0400
 @@ -46,6 +46,7 @@
  	bool slave_mode;
  	unsigned long sysclk;
@@ -22,24 +11,25 @@ runtime-resumed and regmap writes reach the hardware.
  	struct gpio_desc *gpiod_reset;
  	u32 rate[2];
  };
-@@ -240,6 +241,7 @@
- 		return -EINVAL;
- 	}
-
-+	cs42xx8->intf_val = val;
- 	regmap_update_bits(cs42xx8->regmap, CS42XX8_INTF,
+@@ -243,6 +244,8 @@
  			   CS42XX8_INTF_DAC_DIF_MASK |
  			   CS42XX8_INTF_ADC_DIF_MASK, val);
-@@ -344,6 +346,11 @@
- 	regmap_update_bits(cs42xx8->regmap, CS42XX8_FUNCMOD,
- 			   CS42XX8_FUNCMOD_xC_FM_MASK(tx) | mask,
- 			   CS42XX8_FUNCMOD_xC_FM(tx, fm[tx]) | val);
+ 
++	cs42xx8->intf_val = val;
 +
-+	/* Re-apply DAI format — set_dai_fmt may have written to regcache
+ 	/* Set master/slave audio interface */
+ 	switch (format & SND_SOC_DAIFMT_MASTER_MASK) {
+ 	case SND_SOC_DAIFMT_CBS_CFS:
+@@ -346,6 +349,12 @@
+ 			   CS42XX8_FUNCMOD_xC_FM(tx, fm[tx]) | val);
+ 
+ 
++	/* Re-apply DAI format - set_dai_fmt may have written to regcache
 +	 * while the codec was runtime-suspended. */
 +	regmap_update_bits(cs42xx8->regmap, CS42XX8_INTF,
 +			   CS42XX8_INTF_DAC_DIF_MASK |
 +			   CS42XX8_INTF_ADC_DIF_MASK, cs42xx8->intf_val);
-
++
  	return 0;
  }
+ 

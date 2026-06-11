@@ -64,13 +64,6 @@ cset "MVC1 Mux"        "$SOURCE_ADMAIF"
 cset "OPE1 Mux"        "MVC1"
 cset "${SINK_I2S} Mux" "OPE1"
 
-log "I2S5 format: ${I2S5_RATE} Hz, ${I2S5_CHANNELS} ch, ${I2S5_BITS}-bit, DSP-A, codec-slave"
-cset "${SINK_I2S} Sample Rate"             "$I2S5_RATE"
-cset "${SINK_I2S} Playback Audio Channels" "$I2S5_CHANNELS"
-cset "${SINK_I2S} Playback Audio Bit Format" "$I2S5_BITS"
-cset "${SINK_I2S} codec frame mode"        "dsp-a"
-cset "${SINK_I2S} codec master mode"       "cbs-cfs"
-
 log "MVC1 master volume init = $MASTER_VOL ($(( (MASTER_VOL - 12000) / 100 )) dB nominal)"
 cset "MVC1 Volume" "$MASTER_VOL"
 cset "MVC1 Mute"   "off"

@@ -99,11 +99,18 @@
 		cs42448_port: port {
 			cs42448_ep: endpoint {
 				remote-endpoint = <&i2s5_dap_ep>;
-				mclk-fs = <512>;	/* 24.576 MHz @ 48k */
+				mclk-fs = <256>;	/* 12.288 MHz @ 48k */
 				link-name = "cs42448-tdm";
 			};
 		};
 	};
+};
+
+/* Force 8-channel 32-bit TDM at the hardware level. */
+&tegra_i2s5 {
+	nvidia,audio-channels = <8>;
+	nvidia,sample-size = <32>;
+	status = "okay";
 };
 
 /* Replace the stock I2S5 dummy codec link with the CS42448, TDM/DSP_A,
@@ -112,10 +119,11 @@
 	status = "okay";
 	link-name = "cs42448-tdm";
 	format = "dsp_a";
-	bitclock-slave;
-	frame-slave;
+	bitclock-master;
+	frame-master;
 	bitclock-noninversion;
 	frame-noninversion;
+	fsync-width = <0>;
 
 	codec {
 		sound-dai = <&cs42448 0>;
@@ -123,12 +131,21 @@
 	};
 };
 
+/* Disable ADSP — its component_open callback returns -EPIPE ("Broken Path
+ * FE not linked to BE") for every PCM stream on the APE card, blocking the
+ * DPCM framework from opening the I2S5 BE and preventing hw_params from
+ * reaching the CS42448 codec. ADSP is only needed for on-chip DSP plugins
+ * (mp3-dec, spkprot, AEC) which we don't use for direct I2S playback. */
+&tegra_adsp_audio {
+	status = "disabled";
+};
+
 &tegra_sound {
 	assigned-clocks = <&bpmp_clks TEGRA194_CLK_PLLA_OUT0>,
 			  <&bpmp_clks TEGRA194_CLK_AUD_MCLK>;
 	assigned-clock-parents = <&bpmp_clks TEGRA194_CLK_PLLA>,
 				 <&bpmp_clks TEGRA194_CLK_PLLA_OUT0>;
-	assigned-clock-rates = <0>, <12288000>;
+	assigned-clock-rates = <12288000>, <12288000>;
 
 	nvidia-audio-card,widgets =
 		"Speaker", "CS42448 Out1",
