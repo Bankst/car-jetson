@@ -14,6 +14,7 @@ SRC_URI = "git://github.com/bankst/car-jetson.git;protocol=ssh;branch=worktree-a
            git://github.com/bankst/aasdk.git;protocol=https;branch=bankst-dev;destsuffix=aasdk;name=aasdk \
            git://github.com/bankst/openauto.git;protocol=https;branch=qt6;destsuffix=openauto;name=openauto \
            git://github.com/projectM-visualizer/presets-cream-of-the-crop.git;protocol=https;branch=master;destsuffix=presets-cream;name=presets \
+           file://eq-profile.json \
 "
 SRCREV_main      = "3ef8f4fcd6c73f8e2ed3131d68315041fdaceedb"
 SRCREV_libprojectm = "4d2849333b63235a6af4d1f02508a97529d96dc7"
@@ -43,6 +44,7 @@ DEPENDS = " \
     openssl \
     libusb1 \
     pipewire \
+    alsa-lib \
     ffmpeg \
     systemd \
     virtual/egl \
@@ -79,7 +81,15 @@ do_install:append() {
            ${D}${systemd_system_unitdir}/
         rmdir --ignore-fail-on-non-empty ${D}${libdir}/systemd/system ${D}${libdir}/systemd 2>/dev/null || true
     fi
+
+    # Config-time EQ band map (loader falls back to cabin10 if absent; a
+    # /data/banks-frontend/eq-profile.json overrides this at runtime).
+    install -d ${D}${sysconfdir}/banks-audio
+    install -m 0644 ${WORKDIR}/eq-profile.json ${D}${sysconfdir}/banks-audio/eq-profile.json
 }
+
+CONFFILES:${PN} = "${sysconfdir}/banks-audio/eq-profile.json"
+FILES:${PN} += "${sysconfdir}/banks-audio/eq-profile.json"
 
 SYSTEMD_SERVICE:${PN} = "banks-frontend.service"
 SYSTEMD_AUTO_ENABLE = "enable"
@@ -93,6 +103,8 @@ RDEPENDS:${PN} = " \
     qtdeclarative-qmlplugins \
     qtconnectivity \
     pipewire \
+    pipewire-tools \
+    alsa-utils \
     bluez5 \
     openssl \
     libusb1 \

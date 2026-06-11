@@ -22,6 +22,7 @@
 #include "aa/AASessionController.h"
 #include "aa/AAVideoItem.h"
 #include "aa/AudioTestController.h"
+#include "aa/AudioController.h"
 #include "aa/SystemInfo.h"
 #include "aa/BluetoothPairingAgent.h"
 #include "aa/BluetoothManager.h"
@@ -127,6 +128,9 @@ int main(int argc, char** argv) {
     qmlRegisterType<AASessionController>("BanksFrontend", 1, 0, "AASessionController");
     qmlRegisterType<AAVideoItem>("BanksFrontend", 1, 0, "AAVideoItem");
     qmlRegisterType<AudioTestController>("BanksFrontend", 1, 0, "AudioTestController");
+    qmlRegisterType<AudioController>("BanksFrontend", 1, 0, "AudioController");
+    qmlRegisterUncreatableType<SpeakerChannel>("BanksFrontend", 1, 0, "SpeakerChannel",
+        "SpeakerChannel is exposed via AudioController.speakers");
     qmlRegisterType<SystemInfo>("BanksFrontend", 1, 0, "SystemInfo");
     qmlRegisterType<BluetoothPairingAgent>("BanksFrontend", 1, 0, "BluetoothPairingAgent");
     qmlRegisterType<BluetoothManager>("BanksFrontend", 1, 0, "BluetoothManager");
