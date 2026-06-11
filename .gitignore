@@ -23,3 +23,8 @@ _input/*.tar.gz*
 
 # Flash runtime artifacts
 .found-jetson
+
+# Session/editor cruft
+.claude/
+__pycache__/
+*.pyc

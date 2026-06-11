@@ -216,6 +216,7 @@ pkg_check_modules(AVCODEC   REQUIRED IMPORTED_TARGET libavcodec)
 pkg_check_modules(AVUTIL    REQUIRED IMPORTED_TARGET libavutil)
 pkg_check_modules(SWSCALE   REQUIRED IMPORTED_TARGET libswscale)
 pkg_check_modules(SOCKETCAN REQUIRED IMPORTED_TARGET libsocketcan)
+pkg_check_modules(ALSA      REQUIRED IMPORTED_TARGET alsa)
 
 # --- App ---
 qt_add_executable(banks-frontend
@@ -239,6 +240,7 @@ qt_add_executable(banks-frontend
     src/aa/PipeWireAudioOutput.h  src/aa/PipeWireAudioOutput.cpp
     src/aa/PipeWireAudioInput.h   src/aa/PipeWireAudioInput.cpp
     src/aa/AudioTestController.h  src/aa/AudioTestController.cpp
+    src/aa/AudioController.h      src/aa/AudioController.cpp
     src/aa/SystemInfo.h           src/aa/SystemInfo.cpp
     src/aa/BluetoothPairingAgent.h src/aa/BluetoothPairingAgent.cpp
     src/aa/BluetoothManager.h      src/aa/BluetoothManager.cpp
@@ -295,6 +297,7 @@ target_link_libraries(banks-frontend PRIVATE
     PkgConfig::AVUTIL
     PkgConfig::SWSCALE
     PkgConfig::SOCKETCAN
+    PkgConfig::ALSA
     Threads::Threads
 )
 

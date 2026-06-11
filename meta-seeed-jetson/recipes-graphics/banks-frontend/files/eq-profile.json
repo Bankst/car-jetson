@@ -1,0 +1,6 @@
+{
+  "_comment": "Config-time EQ band map for banks-frontend cabin audio. Read at app start (live runtime change not supported - edit + restart banks-frontend). /data/banks-frontend/eq-profile.json overrides this file.",
+  "_bandMap_options": ["cabin10", "cabin11", "graphic-iso-10", "graphic-iso-11"],
+  "_custom_note": "Instead of a named bandMap you may inline a 'bands' array of {freq,type,q} (type = peaking|lowshelf|highshelf). Max 12 bands; per-channel crossover stages share the 12-biquad budget with EQ bands.",
+  "bandMap": "cabin10"
+}
