@@ -39,5 +39,6 @@ SRC_URI:append = " file://0004-cs42xx8-tegra-compat-fixes.patch"
 SRC_URI:append = " file://0005-tegra-asoc-enable-dpcm-on-c2c-links.patch"
 SRC_URI:append = " file://0006-cs42xx8-reapply-dai-fmt-in-hw-params.patch"
 SRC_URI:append = " file://0007-tegra-i2s-add-fixed-tdm-dt-overrides.patch"
+SRC_URI:append = " file://0008-tegra-i2s-bclk-readback-dt-overrides-clamp.patch"
 EXTRA_OEMAKE:append = " KCFLAGS='-Wno-address -Wno-implicit-fallthrough -Wno-int-in-bool-context -Wno-tautological-compare'"
 
