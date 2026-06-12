@@ -40,6 +40,6 @@ SRC_URI:append = " file://0005-tegra-asoc-enable-dpcm-on-c2c-links.patch"
 SRC_URI:append = " file://0006-cs42xx8-reapply-dai-fmt-in-hw-params.patch"
 # NOTE: former 0007 (tegra210_i2s_alt.c DT overrides) dropped — it patched the
 # non-compiled alt source; 0008 supersedes it on the compiled tegra210_i2s.c.
-SRC_URI:append = " file://0008-tegra-i2s-bclk-readback-dt-overrides-clamp.patch"
+SRC_URI:append = " file://0008-tegra-i2s-dt-channel-format-overrides.patch"
 EXTRA_OEMAKE:append = " KCFLAGS='-Wno-address -Wno-implicit-fallthrough -Wno-int-in-bool-context -Wno-tautological-compare'"
 

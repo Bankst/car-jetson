@@ -58,6 +58,19 @@ cset() {
 
 wait_for_card
 
+# Early best-effort: force I2S5 BCLK to 256xFs (12.288MHz). The BPMP rounds
+# clk_set_rate(12288000) UP to 24.576MHz (512xFs), which the CS42448 TDM codec
+# cannot frame (corrupts the last slot). The card is up here so the clock tree
+# is ready. NOTE: pipewire's first stream may re-round this afterwards, so the
+# authoritative lock is reasserted post-pipewire by i2s5-clock-fix.service.
+CLK=/sys/kernel/debug/bpmp/debug/clk/i2s5
+if [ -w "$CLK/mrq_rate_locked" ]; then
+  echo 0 > "$CLK/mrq_rate_locked"
+  echo 12288000 > "$CLK/rate"
+  echo 1 > "$CLK/mrq_rate_locked"
+  log "I2S5 clock locked at $(cat "$CLK/rate") Hz"
+fi
+
 log "wiring playback route: $SOURCE_ADMAIF -> MVC1 -> OPE1 -> $SINK_I2S"
 
 cset "MVC1 Mux"        "$SOURCE_ADMAIF"

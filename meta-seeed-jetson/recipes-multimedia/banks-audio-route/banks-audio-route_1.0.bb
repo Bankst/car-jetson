@@ -12,6 +12,7 @@ COMPATIBLE_MACHINE = "jetson-xavier-nx-(banks-devkit|a203)"
 SRC_URI = " \
     file://banks-audio-route.sh \
     file://banks-audio-route.service \
+    file://i2s5-clock-fix.service \
     file://route.conf \
 "
 
@@ -19,7 +20,7 @@ S = "${WORKDIR}"
 
 inherit systemd
 
-SYSTEMD_SERVICE:${PN} = "banks-audio-route.service"
+SYSTEMD_SERVICE:${PN} = "banks-audio-route.service i2s5-clock-fix.service"
 SYSTEMD_AUTO_ENABLE:${PN} = "enable"
 
 RDEPENDS:${PN} = "alsa-utils"
@@ -32,6 +33,8 @@ do_install() {
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${WORKDIR}/banks-audio-route.service \
         ${D}${systemd_system_unitdir}/banks-audio-route.service
+    install -m 0644 ${WORKDIR}/i2s5-clock-fix.service \
+        ${D}${systemd_system_unitdir}/i2s5-clock-fix.service
 
     install -d ${D}${sysconfdir}/banks-audio
     install -m 0644 ${WORKDIR}/route.conf \
@@ -41,5 +44,6 @@ do_install() {
 FILES:${PN} = " \
     ${sbindir}/banks-audio-route \
     ${systemd_system_unitdir}/banks-audio-route.service \
+    ${systemd_system_unitdir}/i2s5-clock-fix.service \
     ${sysconfdir}/banks-audio/route.conf \
 "
