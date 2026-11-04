@@ -22,4 +22,5 @@ RDEPENDS:${PN} = " \
     triggerhappy \
     matchbox-terminal \
     projectm-frontend-sdl2 \
+    ${@bb.utils.contains('MACHINEOVERRIDES', 'jetson-xavier-nx-a203', 'banks-greeting-tone', '', d)} \
 "

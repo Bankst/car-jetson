@@ -1,0 +1,12 @@
+[Unit]
+Description=Banks greeting tone at boot
+After=banks-audio-route.service
+Requires=banks-audio-route.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/banks-greeting-tone
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

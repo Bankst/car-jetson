@@ -1,0 +1,59 @@
+#!/usr/bin/python3
+"""Generate and play a calm greeting chime through ALSA APE card."""
+import struct, math, os
+
+RATE = 48000
+CHANNELS = 2
+BITS = 16
+VOLUME = 0.20
+
+def sine(freq, duration, vol=VOLUME, attack=0.08, release=0.25):
+    n = int(RATE * duration)
+    out = bytearray(n * CHANNELS * 2)
+    mv = memoryview(out)
+    for i in range(n):
+        t = i / RATE
+        env = min(t / attack, 1.0) if t < attack else min((duration - t) / release, 1.0)
+        s = int(vol * env * math.sin(2.0 * math.pi * freq * t) * 32767)
+        s = max(-32768, min(32767, s))
+        packed = struct.pack('<h', s)
+        for ch in range(CHANNELS):
+            off = (i * CHANNELS + ch) * 2
+            mv[off:off+2] = packed
+    return bytes(out)
+
+def chord(freqs, duration, vol=VOLUME, attack=0.08, release=0.25):
+    n = int(RATE * duration)
+    out = bytearray(n * CHANNELS * 2)
+    mv = memoryview(out)
+    scale = vol / len(freqs)
+    for i in range(n):
+        t = i / RATE
+        env = min(t / attack, 1.0) if t < attack else min((duration - t) / release, 1.0)
+        acc = sum(math.sin(2.0 * math.pi * f * t) for f in freqs)
+        s = int(scale * env * acc * 32767)
+        s = max(-32768, min(32767, s))
+        packed = struct.pack('<h', s)
+        for ch in range(CHANNELS):
+            off = (i * CHANNELS + ch) * 2
+            mv[off:off+2] = packed
+    return bytes(out)
+
+silence = b'\x00' * (CHANNELS * 2 * int(RATE * 0.06))
+
+pcm  = sine(659.25, 0.30, attack=0.04, release=0.20)   # E5 — gentle tap
+pcm += silence
+pcm += chord([523.25, 659.25, 783.99], 0.8, attack=0.06, release=0.50)  # C major — warm resolve
+
+data_size = len(pcm)
+hdr  = struct.pack('<4sI4s', b'RIFF', 36 + data_size, b'WAVE')
+hdr += struct.pack('<4sIHHIIHH', b'fmt ', 16, 1, CHANNELS, RATE,
+                   RATE * CHANNELS * (BITS // 8), CHANNELS * (BITS // 8), BITS)
+hdr += struct.pack('<4sI', b'data', data_size)
+
+path = '/tmp/banks-greeting.wav'
+with open(path, 'wb') as f:
+    f.write(hdr)
+    f.write(pcm)
+
+os.execvp('aplay', ['aplay', '-D', 'hw:APE,0', path])
