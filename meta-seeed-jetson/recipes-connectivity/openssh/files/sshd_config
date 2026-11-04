@@ -12,4 +12,4 @@ Compression no
 ClientAliveInterval 15
 ClientAliveCountMax 4
 
-Subsystem sftp /usr/lib/openssh/sftp-server
+Subsystem sftp /usr/libexec/sftp-server
