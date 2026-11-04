@@ -5,11 +5,11 @@
 set -euo pipefail
 
 TARGET="${JTX_TARGET:-root@192.168.55.1}"
-DEPLOY_DEB="${JTX_DEPLOY_DEB:-/mnt/yoctoworkspace/nx/car-jetson/build/tmp/deploy/deb}"
-SSH_OPTS=(-o ConnectTimeout=5 -o BatchMode=yes)
+DEPLOY_DEB="${JTX_DEPLOY_DEB:-$(pwd)/build/tmp/deploy/deb}"
+SSH_OPTS=(-o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 
 _ssh() { ssh "${SSH_OPTS[@]}" "$TARGET" "$@"; }
-_scp() { scp -o ConnectTimeout=5 "$@"; }
+_scp() { scp -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "$@"; }
 
 _die()  { echo "jtx: error: $*" >&2; exit 1; }
 _bold() { printf '\033[1m%s\033[0m' "$*"; }
