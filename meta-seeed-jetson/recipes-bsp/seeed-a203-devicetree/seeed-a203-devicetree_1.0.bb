@@ -11,6 +11,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/custom:"
 SRC_URI = " \
     file://tegra194-p3668-a203.dts \
     file://a203-sd.dtsi \
+    file://cs42448.dtsi \
 "
 
 KERNEL_INCLUDE = " \

@@ -1,0 +1,17 @@
+[Unit]
+Description=Banks AHUB audio route + DSP defaults
+DefaultDependencies=no
+After=systemd-modules-load.service sysinit.target alsa-restore.service
+Before=sound.target pipewire.service wireplumber.service
+Wants=sound.target
+ConditionPathExists=/proc/asound/APE
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/banks-audio-route
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sound.target multi-user.target

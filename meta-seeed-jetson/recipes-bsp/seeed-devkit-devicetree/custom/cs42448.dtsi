@@ -1,0 +1,170 @@
+// CS42448 TDM codec on Tegra I2S5 (DAP5, 40-pin header).
+//
+// 8 DAC out / 6 ADC in, single-pair TDM (DSP_A), I2C control (CS strapped
+// GND -> I2C mode, AD0=AD1=0 -> addr 0x48). Codec is clock SLAVE; Tegra
+// I2S5 is BCLK+FS+MCLK master. MCLK from AUD_MCLK (header pin 7). The active
+// NVIDIA APE card (nvidia,tegra186-ape) uses card-level mclk-fs=256, so at
+// 48k MCLK = 12.288 MHz (NOT 24.576/512x). The endpoint mclk-fs below is an
+// audio-graph-card property and is inert here (the graph card is disabled);
+// the codec is a slave and its MFREQ follows whatever the machine driver
+// programs. RESET on soc_gpio41_pq5 = MAIN_GPIO(Q,5) = header pin 29.
+//
+// Pinmux: MB1 owns boot pinmux for most pads. NOTE (devkit): the STOCK NVIDIA
+// p3668 MB1 pinmux may NOT default DAP5 to i2s5. If the card is silent on
+// devkit, either apply NVIDIA's jetson-io hdr40 overlay or add a &pinmux i2s5
+// fragment here. Verify on devkit hardware before assuming the pins are routed.
+// EXCEPTION: pin 29 (soc_gpio41_pq5) needs a kernel-side pinmux override to
+// set PULL_UP. Stock hdr40 DTS sets PULL_NONE + function=extperiph3; when the
+// cs42xx8 driver releases the GPIO, the pad floats to ~1.55V — below VIH for
+// 3.3V logic — holding the codec in reset. Fix: function=rsvd2 + pull-up.
+//
+// Full design: docs/jetson-cs42448-tdm-plan.md + docs/jetson-audio-multimode-dsp.md.
+//
+// Bring-up notes / things to verify on first hardware:
+//   - cs42xx8 probe reads CHIP_ID over I2C. I2C control is independent of
+//     MCLK (control works at reset) — confirmed at the bench: codec ACKs at
+//     0x48 with no MCLK running. So probe should not need MCLK energised early.
+//   - "format"/"bitclock-master"/"frame-master" on the dai-link drive the
+//     Tegra machine driver's set_dai_fmt (DSP_A) + master select. Mirrors the
+//     jetson-respeaker-4-mic TDM overlay pattern.
+//   - Card-level routing/widgets are needed only for the capture (ADC) path;
+//     playback (DAC->AOUT terminal) needs none. Add when wiring capture.
+//   - VA=5V, VD/VLS/VLC=3V3 come from the codec board's own LDO; the
+//     regulator-fixed nodes below are nominal always-on handles the driver's
+//     *-supply bindings require (enable is a no-op).
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/gpio/tegra194-gpio.h>
+#include <dt-bindings/clock/tegra194-clock.h>
+#include <dt-bindings/pinctrl/pinctrl-tegra.h>
+
+/ {
+	reg_cs42448_va: regulator-cs42448-va {
+		compatible = "regulator-fixed";
+		regulator-name = "cs42448-va";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+
+	reg_cs42448_3v3: regulator-cs42448-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "cs42448-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+};
+
+/* Pin 29 (soc_gpio41_pq5): override stock hdr40 pinmux to add pull-up so RST#
+ * defaults high (de-asserted) even when the GPIO is unclaimed by the driver. */
+&pinmux {
+	cs42448_rst_default: cs42448-rst-default {
+		nvidia,pins = "soc_gpio41_pq5";
+		nvidia,function = "rsvd2";
+		nvidia,pull = <TEGRA_PIN_PULL_UP>;
+		nvidia,tristate = <TEGRA_PIN_ENABLE>;
+		nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+		nvidia,io-high-voltage = <TEGRA_PIN_DISABLE>;
+		nvidia,lpdr = <TEGRA_PIN_DISABLE>;
+	};
+};
+
+/* CS42448 control port -> gen2 I2C (header pins 27 SDA / 28 SCL), addr 0x48 */
+&gen2_i2c {
+	status = "okay";
+	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&cs42448_rst_default>;
+
+	cs42448: audio-codec@48 {
+		compatible = "cirrus,cs42448";
+		reg = <0x48>;
+
+		clocks = <&bpmp_clks TEGRA194_CLK_AUD_MCLK>;
+		clock-names = "mclk";
+
+		VA-supply  = <&reg_cs42448_va>;
+		VD-supply  = <&reg_cs42448_3v3>;
+		VLS-supply = <&reg_cs42448_3v3>;
+		VLC-supply = <&reg_cs42448_3v3>;
+
+		/* RST# = soc_gpio41_pq5 = MAIN_GPIO(Q,5) = 40-pin header pin 29 */
+		reset-gpios = <&tegra_main_gpio TEGRA194_MAIN_GPIO(Q, 5) GPIO_ACTIVE_LOW>;
+
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "CS42448";
+		status = "okay";
+
+		cs42448_port: port {
+			cs42448_ep: endpoint {
+				remote-endpoint = <&i2s5_dap_ep>;
+				mclk-fs = <256>;	/* 12.288 MHz @ 48k */
+				link-name = "cs42448-tdm";
+			};
+		};
+	};
+};
+
+/* Force 8-channel 32-bit TDM at the hardware level. */
+&tegra_i2s5 {
+	nvidia,audio-channels = <8>;
+	nvidia,sample-size = <32>;
+	status = "okay";
+};
+
+/* Replace the stock I2S5 dummy codec link with the CS42448, TDM/DSP_A,
+ * Tegra I2S5 as bit+frame clock master. */
+&i2s5_to_codec {
+	status = "okay";
+	link-name = "cs42448-tdm";
+	format = "dsp_a";
+	bitclock-master;
+	frame-master;
+	bitclock-noninversion;
+	frame-noninversion;
+	fsync-width = <0>;
+
+	codec {
+		sound-dai = <&cs42448 0>;
+		prefix = "CS42448";
+	};
+};
+
+/* Disable ADSP — its component_open callback returns -EPIPE ("Broken Path
+ * FE not linked to BE") for every PCM stream on the APE card, blocking the
+ * DPCM framework from opening the I2S5 BE and preventing hw_params from
+ * reaching the CS42448 codec. ADSP is only needed for on-chip DSP plugins
+ * (mp3-dec, spkprot, AEC) which we don't use for direct I2S playback. */
+&tegra_adsp_audio {
+	status = "disabled";
+};
+
+&tegra_sound {
+	assigned-clocks = <&bpmp_clks TEGRA194_CLK_PLLA_OUT0>,
+			  <&bpmp_clks TEGRA194_CLK_AUD_MCLK>;
+	assigned-clock-parents = <&bpmp_clks TEGRA194_CLK_PLLA>,
+				 <&bpmp_clks TEGRA194_CLK_PLLA_OUT0>;
+	assigned-clock-rates = <12288000>, <12288000>;
+
+	nvidia-audio-card,widgets =
+		"Speaker", "CS42448 Out1",
+		"Speaker", "CS42448 Out2",
+		"Speaker", "CS42448 Out3",
+		"Speaker", "CS42448 Out4";
+	nvidia-audio-card,routing =
+		"CS42448 Out1",     "CS42448 AOUT1L",
+		"CS42448 Out1",     "CS42448 AOUT1R",
+		"CS42448 Out2",     "CS42448 AOUT2L",
+		"CS42448 Out2",     "CS42448 AOUT2R",
+		"CS42448 Out3",     "CS42448 AOUT3L",
+		"CS42448 Out3",     "CS42448 AOUT3R",
+		"CS42448 Out4",     "CS42448 AOUT4L",
+		"CS42448 Out4",     "CS42448 AOUT4R";
+};
+
+/* Point the I2S5 DAP audio-graph endpoint at the codec instead of the dummy. */
+&i2s5_dap_ep {
+	remote-endpoint = <&cs42448_ep>;
+	dai-format = "dsp_a";
+};

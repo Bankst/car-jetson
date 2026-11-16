@@ -1,0 +1,47 @@
+From: Banks Troutman <banks.troutman@oxos.com>
+Date: Tue, 10 Jun 2026 00:00:00 +0000
+Subject: [PATCH] ASoC: tegra210-i2s: nvidia,audio-channels/sample-size DT overrides
+
+Read nvidia,audio-channels and nvidia,sample-size from the I2S DT node at
+probe and apply them as the channel-count / sample-format overrides. Without
+this the DPCM codec-to-codec link negotiates 2ch/S16 and the I2S5 BCLK/LRCK
+framing is wrong for an 8ch/32-bit TDM codec (CS42448).
+
+bit_count is intentionally left to the stock computation, which derives BCLK
+from the *requested* params: srate * channels * sample_size = 48000*8*32 =
+12_288_000, giving bit_count = 256-1 = 255 (one full 8x32 frame).
+
+HARDWARE-PROVEN ROOT CAUSE (do not "fix" by reading the real clock):
+A prior revision read the *actual* BCLK back with clk_get_rate() and used it
+for bit_count. The Tegra PLLA produces 12_287_996 Hz (not 12_288_000), so the
+integer divide 12287996/48000 = 255 yielded bit_count 254 — one bit short per
+frame. That corrupted the LAST TDM slot only (slot 7 aliased onto DAC1/AOUT2,
+audible as sharp/loud distortion; slots 0-6 fine). Verified on A203 by per-slot
+scope + ear mapping. Keep the computed rate, and force the BPMP i2s5 clock to
+256xFs externally via i2s5-clock-fix.service — the BPMP otherwise rounds
+clk_set_rate(12288000) UP to 24.576 MHz (512xFs), which the codec cannot frame.
+
+---
+--- a/sound/soc/tegra/tegra210_i2s.c
++++ b/sound/soc/tegra/tegra210_i2s.c
+@@ -1240,6 +1240,20 @@
+
+ 	regcache_cache_only(i2s->regmap, true);
+
++	{
++		unsigned int v;
++		if (of_property_read_u32(dev->of_node, "nvidia,audio-channels", &v) == 0) {
++			i2s->audio_ch_override[I2S_RX_PATH] = v;
++			i2s->audio_ch_override[I2S_TX_PATH] = v;
++			i2s->client_ch_override = v;
++		}
++		if (of_property_read_u32(dev->of_node, "nvidia,sample-size", &v) == 0) {
++			i2s->audio_fmt_override[I2S_RX_PATH] = (v == 32) ? 2 : 1;
++			i2s->audio_fmt_override[I2S_TX_PATH] = (v == 32) ? 2 : 1;
++			i2s->client_fmt_override = (v == 32) ? 2 : 1;
++		}
++	}
++
+ 	err = devm_snd_soc_register_component(dev, &tegra210_i2s_cmpnt,
+ 					      tegra210_i2s_dais,
+ 					      ARRAY_SIZE(tegra210_i2s_dais));

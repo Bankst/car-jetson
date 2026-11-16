@@ -1,0 +1,26 @@
+From: Banks Troutman <banks.troutman@oxos.com>
+Subject: [PATCH] video: tegra: dc: allow portrait resolutions above 2160p
+
+The HDMI mode filter rejects any mode with yres > 2160, which blocks
+portrait displays like the Waveshare WS-55-2K (1440x2560@50Hz). The
+display controller hardware supports up to 4096x4096, so raise the
+vertical limit to match the horizontal one.
+
+Signed-off-by: Banks Troutman <banks.troutman@oxos.com>
+---
+ nvidia/drivers/video/tegra/dc/hdmi2.0.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/nvidia/drivers/video/tegra/dc/hdmi2.0.c b/nvidia/drivers/video/tegra/dc/hdmi2.0.c
+index abcdef1..1234567 100644
+--- a/nvidia/drivers/video/tegra/dc/hdmi2.0.c
++++ b/nvidia/drivers/video/tegra/dc/hdmi2.0.c
+@@ -336,7 +336,7 @@ static bool tegra_hdmi_fb_mode_filter(const struct tegra_dc *dc,
+ 	if (!mode->pixclock)
+ 		return false;
+
+-	if (mode->xres > 4096 || mode->yres > 2160)
++	if (mode->xres > 4096 || mode->yres > 4096)
+ 		return false;
+
+ #if defined(CONFIG_TEGRA_YUV_BYPASS_MODE_FILTER)

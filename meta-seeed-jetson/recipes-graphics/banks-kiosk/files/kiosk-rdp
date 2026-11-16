@@ -1,0 +1,106 @@
+#!/bin/sh
+# kiosk-rdp — start/stop on-demand RDP mirroring of the live Weston kiosk.
+#
+# Weston's screen-share plugin clones the running output to a nested weston on
+# the RDP backend. It is triggered by the Ctrl+Alt+S keybinding (hardcoded in
+# weston 10's compositor/screen-share.c). There is no native CLI trigger, so
+# this injects the combo via ydotool (uinput -> kernel -> weston's libinput).
+#
+# The screen-share binding picks the output under the pointer and needs a seat
+# pointer to exist (touch-only seats return NULL -> "Seat does not have
+# pointer"). Running ydotoold creates a virtual pointer, which satisfies that.
+#
+#   kiosk-rdp on       inject Ctrl+Alt+S -> spawn RDP server, print IP:PORT
+#   kiosk-rdp off      kill the nested RDP weston (stop listening)
+#   kiosk-rdp status   show whether the RDP server is up
+set -eu
+
+PORT=3389
+CERT_DIR=/etc/kiosk/rdp
+CERT=$CERT_DIR/tls.crt
+KEY=$CERT_DIR/tls.key
+YDOTOOL_SOCK=/run/kiosk-ydotool.sock
+export YDOTOOL_SOCKET="$YDOTOOL_SOCK"
+
+# Linux input-event keycodes (see <linux/input-event-codes.h>)
+KEY_LEFTCTRL=29
+KEY_LEFTALT=56
+KEY_S=31
+
+die() { echo "kiosk-rdp: $*" >&2; exit 1; }
+
+ensure_cert() {
+    [ -f "$CERT" ] && [ -f "$KEY" ] && return 0
+    command -v openssl >/dev/null 2>&1 || die "openssl missing; cannot generate RDP TLS cert"
+    echo "kiosk-rdp: generating self-signed RDP TLS cert in $CERT_DIR"
+    mkdir -p "$CERT_DIR"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+        -keyout "$KEY" -out "$CERT" -subj "/CN=banks-kiosk-rdp" >/dev/null 2>&1 \
+        || die "openssl cert generation failed"
+    chmod 600 "$KEY"
+}
+
+ensure_ydotoold() {
+    command -v ydotoold >/dev/null 2>&1 || die "ydotoold missing (RDEPENDS ydotool)"
+    if ! pgrep -x ydotoold >/dev/null 2>&1; then
+        echo "kiosk-rdp: starting ydotoold (socket $YDOTOOL_SOCK)"
+        ydotoold --socket-path="$YDOTOOL_SOCK" --socket-perm=0600 >/dev/null 2>&1 &
+        # libinput in weston needs a moment to hotplug the new virtual device
+        sleep 1.5
+    fi
+}
+
+server_pid() { pgrep -f 'weston .*rdp-backend.so' 2>/dev/null || true; }
+
+print_endpoints() {
+    echo "kiosk-rdp: RDP server should be listening on:"
+    for ip in $(hostname -I 2>/dev/null); do
+        echo "    $ip:$PORT"
+    done
+    echo "  connect with any RDP client (self-signed cert -> accept the warning)"
+}
+
+case "${1:-}" in
+on|start)
+    [ -n "$(server_pid)" ] && { echo "kiosk-rdp: already running (pid $(server_pid))"; print_endpoints; exit 0; }
+    ensure_cert
+    ensure_ydotoold
+    # Best-effort: nudge the pointer onto output 0 (syntax differs across
+    # ydotool versions; harmless if it fails — ydotoold already gave us a
+    # pointer at (0,0), which is on the primary output).
+    ydotool mousemove -a -x 400 -y 400 >/dev/null 2>&1 \
+        || ydotool mousemove 400 400 >/dev/null 2>&1 || true
+    # Inject Ctrl+Alt+S (press in order, release in reverse).
+    ydotool key \
+        ${KEY_LEFTCTRL}:1 ${KEY_LEFTALT}:1 ${KEY_S}:1 \
+        ${KEY_S}:0 ${KEY_LEFTALT}:0 ${KEY_LEFTCTRL}:0 \
+        || die "ydotool key injection failed"
+    sleep 1
+    if [ -n "$(server_pid)" ]; then
+        echo "kiosk-rdp: started (pid $(server_pid))"
+        print_endpoints
+    else
+        die "RDP weston did not start — check 'journalctl -t weston' for screen-share errors"
+    fi
+    ;;
+off|stop)
+    pid="$(server_pid)"
+    [ -z "$pid" ] && { echo "kiosk-rdp: not running"; exit 0; }
+    echo "kiosk-rdp: stopping RDP weston (pid $pid)"
+    # shellcheck disable=SC2086
+    kill $pid 2>/dev/null || true
+    ;;
+status)
+    pid="$(server_pid)"
+    if [ -n "$pid" ]; then
+        echo "kiosk-rdp: UP (pid $pid)"
+        print_endpoints
+    else
+        echo "kiosk-rdp: down"
+    fi
+    ;;
+*)
+    echo "usage: kiosk-rdp {on|off|status}" >&2
+    exit 2
+    ;;
+esac

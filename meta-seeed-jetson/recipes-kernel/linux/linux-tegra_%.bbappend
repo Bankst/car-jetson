@@ -15,9 +15,16 @@ SRC_URI:append = " \
     file://no-camera.cfg \
     file://no-bloat.cfg \
     file://no-debug.cfg \
-    file://no-audio-soc.cfg \
     file://feature-adds.cfg \
 "
+
+# Audio kernel config: BOTH carriers run the CS42448 TDM codec on I2S5/DAP5
+# via the 40-pin header (standard NVIDIA pinout), so both get the full SoC
+# audio stack (AHUB/ADMAIF/I2S5/...) + the cs42xx8 codec driver.
+# no-audio-soc.cfg is retained in-tree but unreferenced; re-gate a carrier to
+# it to drop SoC audio for boot speed / ADSP log noise if the codec is removed.
+SRC_URI:append:jetson-xavier-nx-a203          = " file://audio-soc.cfg file://cs42448.cfg"
+SRC_URI:append:jetson-xavier-nx-banks-devkit  = " file://audio-soc.cfg file://cs42448.cfg"
 
 # GCC 13 (scarthgap) compatibility — applies to ALL Xavier NX builds. L4T
 # 5.10 was authored for GCC 11; GCC 13 promotes several new warnings to
@@ -27,5 +34,12 @@ SRC_URI:append = " \
 #   -Wint-in-bool-context  : nvidia display driver ternary expressions
 #   -Wtautological-compare : misc r8168 OOT module
 SRC_URI:append = " file://0002-nvgpu-drop-gcc13-implicit-fallthrough-override.patch"
+SRC_URI:append = " file://0003-hdmi-allow-portrait-resolutions-above-2160p.patch"
+SRC_URI:append = " file://0004-cs42xx8-tegra-compat-fixes.patch"
+SRC_URI:append = " file://0005-tegra-asoc-enable-dpcm-on-c2c-links.patch"
+SRC_URI:append = " file://0006-cs42xx8-reapply-dai-fmt-in-hw-params.patch"
+# NOTE: former 0007 (tegra210_i2s_alt.c DT overrides) dropped — it patched the
+# non-compiled alt source; 0008 supersedes it on the compiled tegra210_i2s.c.
+SRC_URI:append = " file://0008-tegra-i2s-dt-channel-format-overrides.patch"
 EXTRA_OEMAKE:append = " KCFLAGS='-Wno-address -Wno-implicit-fallthrough -Wno-int-in-bool-context -Wno-tautological-compare'"
 
